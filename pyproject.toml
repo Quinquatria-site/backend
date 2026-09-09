@@ -21,6 +21,7 @@ members = ["apps/*"]
 addopts = ["--import-mode=importlib", "-q"]
 testpaths = [
     "apps/backoffice/tests",
+    "apps/common/tests",
     "apps/customer/tests",
 ]
 
@@ -28,6 +29,7 @@ testpaths = [
 target-version = "py314"
 src = [
     "apps/backoffice/src",
+    "apps/common/src",
     "apps/customer/src",
 ]
 

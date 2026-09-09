@@ -5,6 +5,7 @@ requires-python = ">=3.14"
 [manifest]
 members = [
     "backoffice",
+    "common",
     "customer",
     "quinquatria-backend",
 ]
@@ -54,11 +55,15 @@ name = "backoffice"
 version = "0.1.0"
 source = { editable = "apps/backoffice" }
 dependencies = [
+    { name = "common" },
     { name = "fastapi", extra = ["standard"] },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "fastapi", extras = ["standard"], specifier = ">=0.141.1" }]
+requires-dist = [
+    { name = "common", editable = "apps/common" },
+    { name = "fastapi", extras = ["standard"], specifier = ">=0.141.1" },
+]
 
 [[package]]
 name = "certifi"
@@ -88,15 +93,30 @@ wheels = [
 ]
 
 [[package]]
+name = "common"
+version = "0.1.0"
+source = { editable = "apps/common" }
+dependencies = [
+    { name = "fastapi" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "fastapi", specifier = ">=0.141.1" }]
+
+[[package]]
 name = "customer"
 version = "0.1.0"
 source = { editable = "apps/customer" }
 dependencies = [
+    { name = "common" },
     { name = "fastapi", extra = ["standard"] },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "fastapi", extras = ["standard"], specifier = ">=0.141.1" }]
+requires-dist = [
+    { name = "common", editable = "apps/common" },
+    { name = "fastapi", extras = ["standard"], specifier = ">=0.141.1" },
+]
 
 [[package]]
 name = "detect-installer"
