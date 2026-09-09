@@ -1,0 +1,19 @@
+[project]
+name = "backoffice"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "jiyonggg", email = "kimvergognoso21@hufs.ac.kr" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi[standard]>=0.141.1",
+]
+
+[tool.fastapi]
+entrypoint = "backoffice.main:app"
+
+[build-system]
+requires = ["uv_build>=0.12.11,<0.13.0"]
+build-backend = "uv_build"
