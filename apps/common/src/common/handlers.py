@@ -16,6 +16,9 @@ from common.errors import ApiError, ErrorCode, ErrorDetail
 
 logger = logging.getLogger(__name__)
 
+_JSON_SYNTAX_ERROR = "json_invalid"
+_MALFORMED_JSON_MESSAGE = "JSON 구문이 올바르지 않습니다."
+
 _STATUS_CODE: dict[int, ErrorCode] = {
     400: ErrorCode.INVALID_REQUEST,
     401: ErrorCode.INVALID_TOKEN,
@@ -50,9 +53,21 @@ async def handle_api_error(request: Request, exc: ApiError) -> JSONResponse:
 async def handle_validation_error(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
+    """FastAPI가 요청 검증에 실패했을 때의 응답을 만든다.
+
+    본문이 JSON으로 파싱되지 않는 경우도 같은 예외로 전달된다. 명세 §2.6은
+    구문 오류를 400 INVALID_REQUEST로, 값 위반을 422 VALIDATION_ERROR로 나눠
+    규정하므로 둘을 구분한다. 구문 오류의 `loc`은 문자 오프셋이라 클라이언트가
+    고칠 필드를 가리키지 못하므로 `details`를 비운다.
+    """
+    errors = exc.errors()
+    if any(error["type"] == _JSON_SYNTAX_ERROR for error in errors):
+        return _response(
+            ApiError(ErrorCode.INVALID_REQUEST, message=_MALFORMED_JSON_MESSAGE)
+        )
+
     details = [
-        ErrorDetail(field=_field(error["loc"]), reason=error["msg"])
-        for error in exc.errors()
+        ErrorDetail(field=_field(error["loc"]), reason=error["msg"]) for error in errors
     ]
     return _response(ApiError(ErrorCode.VALIDATION_ERROR, details=details))
 

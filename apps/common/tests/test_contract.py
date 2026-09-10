@@ -5,9 +5,10 @@ from typing import Annotated
 import pytest
 from fastapi import APIRouter, Query, Response, status
 from fastapi.testclient import TestClient
+from pydantic import BaseModel
 
 from common.app import API_V1_PREFIX, create_api_app
-from common.enums import LanguageCode
+from common.enums import LanguageCode, NoticeType
 from common.errors import ApiError, ErrorCode, ErrorDetail
 from common.pagination import Page
 from common.query import LanguageQuery, ListQuery, NoQuery
@@ -51,6 +52,16 @@ async def delete_category(category_id: int) -> Response:
             )
         ],
     )
+
+
+class _NoticeCreate(BaseModel):
+    type: NoticeType
+    title: str
+
+
+@router.post("/notices")
+async def create_notice(body: _NoticeCreate) -> dict:
+    return {"type": body.type, "title": body.title}
 
 
 @router.get("/boom")
@@ -160,6 +171,43 @@ def test_api_error_without_details_returns_an_empty_array() -> None:
         "message": "요청한 리소스를 찾을 수 없습니다.",
         "details": [],
     }
+
+
+def test_malformed_json_body_is_an_invalid_request() -> None:
+    response = client.post(
+        "/api/v1/notices",
+        content=b"{not json",
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "code": "INVALID_REQUEST",
+        "message": "JSON 구문이 올바르지 않습니다.",
+        "details": [],
+    }
+
+
+def test_valid_json_with_a_bad_value_is_still_a_validation_error() -> None:
+    response = client.post("/api/v1/notices", json={"type": "general", "title": "제목"})
+
+    assert response.status_code == 422
+    assert response.json()["code"] == ErrorCode.VALIDATION_ERROR
+    assert response.json()["details"][0]["field"] == "type"
+
+
+def test_missing_body_field_is_a_validation_error() -> None:
+    response = client.post("/api/v1/notices", json={"type": "GENERAL"})
+
+    assert response.status_code == 422
+    assert response.json()["details"][0]["field"] == "title"
+
+
+def test_body_of_the_wrong_type_is_a_validation_error() -> None:
+    response = client.post("/api/v1/notices", json=[1, 2, 3])
+
+    assert response.status_code == 422
+    assert response.json()["details"][0]["field"] == "body"
 
 
 def test_unknown_path_returns_the_spec_error_body() -> None:
