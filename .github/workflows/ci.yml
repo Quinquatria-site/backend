@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+
+# 같은 브랜치에 연속으로 push하면 이전 실행을 취소한다. main과 develop의
+# 기록은 남겨야 하므로 PR에서만 취소한다.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  # 로컬과 CI가 같은 uv로 동작하도록 고정한다. 올릴 때는 이 값만 바꾼다.
+  UV_VERSION: "0.12.11"
+
+jobs:
+  lint:
+    name: 린트와 포맷
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      # setup-uv는 부동 메이저 태그(@v10)를 publish하지 않는다. 공식 문서대로
+      # 커밋 SHA로 고정하고 사람이 읽을 버전을 주석으로 남긴다.
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      # --locked는 uv.lock이 pyproject.toml과 어긋나면 실패한다.
+      # 의존성을 바꾸고 lock을 갱신하지 않은 PR을 여기서 잡는다.
+      - name: 의존성 설치
+        run: uv sync --all-packages --locked
+
+      - name: ruff check
+        run: uv run ruff check .
+
+      - name: ruff format
+        run: uv run ruff format --check .
+
+  test:
+    name: 테스트
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      # setup-uv는 부동 메이저 태그(@v10)를 publish하지 않는다. 공식 문서대로
+      # 커밋 SHA로 고정하고 사람이 읽을 버전을 주석으로 남긴다.
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - name: 의존성 설치
+        run: uv sync --all-packages --locked
+
+      # packages/persistence의 테스트는 Testcontainers로 postgres:18 컨테이너를
+      # 띄운다. ubuntu-latest 러너에는 Docker가 기본 설치되어 있다.
+      - name: pytest
+        run: uv run --all-packages pytest

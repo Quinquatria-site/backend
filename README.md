@@ -9,17 +9,17 @@ apps/
 ├── backoffice/
 │   ├── src/backoffice/
 │   └── tests/
-├── common/
-│   ├── src/common/
-│   └── tests/
 └── customer/
     ├── src/customer/
     └── tests/
 packages/
-└── persistence/
-    ├── src/quinquatria_persistence/
-    └── tests/
-migrations/
+├── persistence/
+│   ├── src/quinquatria_persistence/
+│   └── tests/
+├── common/
+│   ├── src/common/
+│   └── tests/
+├── migrations/
 └── versions/
 ```
 

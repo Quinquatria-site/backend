@@ -61,9 +61,7 @@ async def test_image_fields_accept_null(database, rows, table, column):
         )
 
 
-async def test_description_and_found_location_default_to_empty_string(
-    database, rows
-):
+async def test_description_and_found_location_default_to_empty_string(database, rows):
     rows_without_defaulted_fields = {
         "place_translation": {
             "place_id": rows["place"],
