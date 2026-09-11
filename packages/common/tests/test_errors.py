@@ -1,6 +1,6 @@
 import pytest
 
-from common.errors import ApiError, ErrorCode, ErrorDetail, ErrorResponse
+from backend.packages.common.src.common.errors import ApiError, ErrorCode, ErrorDetail, ErrorResponse
 
 SPEC_STATUS = {
     ErrorCode.INVALID_REQUEST: 400,

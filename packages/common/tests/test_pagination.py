@@ -1,7 +1,7 @@
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from common.pagination import Page
+from backend.packages.common.src.common.pagination import Page
 
 
 class _Item(BaseModel):

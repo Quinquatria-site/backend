@@ -1,7 +1,7 @@
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from common.enums import CategoryCode, LanguageCode, NoticeType, PerformanceType
+from backend.packages.common.src.common.enums import CategoryCode, LanguageCode, NoticeType, PerformanceType
 
 
 def test_language_code_members() -> None:

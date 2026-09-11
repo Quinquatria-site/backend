@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 
 from backoffice.api.router import api_router
-from common.app import create_api_app
+from backend.packages.common.src.common.app import create_api_app
 
 
 def create_app() -> FastAPI:

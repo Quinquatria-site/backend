@@ -5,7 +5,7 @@
 
 from fastapi import APIRouter, FastAPI
 
-from common.handlers import register_exception_handlers
+from backend.packages.common.src.common.handlers import register_exception_handlers
 
 API_V1_PREFIX = "/api/v1"
 

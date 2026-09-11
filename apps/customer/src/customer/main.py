@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from common.app import create_api_app
+from backend.packages.common.src.common.app import create_api_app
 from customer.api.router import api_router
 
 

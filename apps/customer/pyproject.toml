@@ -10,7 +10,11 @@ requires-python = ">=3.14"
 dependencies = [
     "common",
     "fastapi[standard]>=0.141.1",
+    "quinquatria-persistence",
 ]
+
+[tool.uv.sources]
+quinquatria-persistence = { workspace = true }
 
 [tool.fastapi]
 entrypoint = "customer.main:app"

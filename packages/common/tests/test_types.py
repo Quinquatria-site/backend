@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta, timezone
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from common.types import AwareDatetime, Price, ResourceId
+from backend.packages.common.src.common.types import AwareDatetime, Price, ResourceId
 
 
 class _Model(BaseModel):

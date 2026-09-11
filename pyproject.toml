@@ -7,15 +7,18 @@ dependencies = []
 
 [dependency-groups]
 dev = [
+    "alembic>=1.17,<2",
     "pytest>=9.0.0",
+    "pytest-asyncio>=1.2,<2",
     "ruff>=0.13.0",
+    "testcontainers[postgres]>=4.15,<5",
 ]
 
 [tool.uv]
 package = false
 
 [tool.uv.workspace]
-members = ["apps/*"]
+members = ["apps/*", "packages/*"]
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib", "-q"]
@@ -23,7 +26,10 @@ testpaths = [
     "apps/backoffice/tests",
     "apps/common/tests",
     "apps/customer/tests",
+    "packages/persistence/tests",
 ]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 [tool.ruff]
 target-version = "py314"
@@ -31,6 +37,7 @@ src = [
     "apps/backoffice/src",
     "apps/common/src",
     "apps/customer/src",
+    "packages/persistence/src",
 ]
 
 [tool.ruff.lint]

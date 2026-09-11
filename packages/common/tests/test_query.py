@@ -1,8 +1,8 @@
 import pytest
 from pydantic import ValidationError
 
-from common.enums import LanguageCode
-from common.query import LanguageQuery, ListQuery, NoQuery, PageQuery
+from backend.packages.common.src.common.enums import LanguageCode
+from backend.packages.common.src.common.query import LanguageQuery, ListQuery, NoQuery, PageQuery
 
 
 def test_list_query_defaults_match_the_spec() -> None:

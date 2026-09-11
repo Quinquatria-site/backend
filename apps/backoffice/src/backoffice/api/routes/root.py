@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query
 
-from common.query import NoQuery
+from backend.packages.common.src.common.query import NoQuery
 
 router = APIRouter()
 

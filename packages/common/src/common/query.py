@@ -8,7 +8,7 @@ Pydantic이 검증 오류를 내고, 전역 핸들러가 이를 422 VALIDATION_E
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from common.enums import LanguageCode
+from backend.packages.common.src.common.enums import LanguageCode
 
 MIN_PAGE = 1
 DEFAULT_PAGE = 1
