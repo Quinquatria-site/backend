@@ -24,8 +24,8 @@ members = ["apps/*", "packages/*"]
 addopts = ["--import-mode=importlib", "-q"]
 testpaths = [
     "apps/backoffice/tests",
-    "apps/common/tests",
     "apps/customer/tests",
+    "packages/common/tests",
     "packages/persistence/tests",
 ]
 asyncio_mode = "auto"
@@ -35,8 +35,8 @@ asyncio_default_fixture_loop_scope = "function"
 target-version = "py314"
 src = [
     "apps/backoffice/src",
-    "apps/common/src",
     "apps/customer/src",
+    "packages/common/src",
     "packages/persistence/src",
 ]
 

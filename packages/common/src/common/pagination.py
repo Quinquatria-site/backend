@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, Field
 
-from backend.packages.common.src.common.query import MAX_SIZE, MIN_PAGE, MIN_SIZE
+from common.query import MAX_SIZE, MIN_PAGE, MIN_SIZE
 
 
 class Page[T](BaseModel):

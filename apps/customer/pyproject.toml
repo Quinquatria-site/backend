@@ -14,13 +14,11 @@ dependencies = [
 ]
 
 [tool.uv.sources]
+common = { workspace = true }
 quinquatria-persistence = { workspace = true }
 
 [tool.fastapi]
 entrypoint = "customer.main:app"
-
-[tool.uv.sources]
-common = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.12.11,<0.13.0"]

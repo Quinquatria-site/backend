@@ -7,11 +7,11 @@ from fastapi import APIRouter, Query, Response, status
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
-from backend.packages.common.src.common.app import API_V1_PREFIX, create_api_app
-from backend.packages.common.src.common.enums import LanguageCode, NoticeType
-from backend.packages.common.src.common.errors import ApiError, ErrorCode, ErrorDetail
-from backend.packages.common.src.common.pagination import Page
-from backend.packages.common.src.common.query import LanguageQuery, ListQuery, NoQuery
+from common.app import API_V1_PREFIX, create_api_app
+from common.enums import LanguageCode, NoticeType
+from common.errors import ApiError, ErrorCode, ErrorDetail
+from common.pagination import Page
+from common.query import LanguageQuery, ListQuery, NoQuery
 
 router = APIRouter()
 
