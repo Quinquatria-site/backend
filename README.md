@@ -13,10 +13,13 @@ apps/
     ├── src/customer/
     └── tests/
 packages/
-└── persistence/
-    ├── src/quinquatria_persistence/
-    └── tests/
-migrations/
+├── persistence/
+│   ├── src/quinquatria_persistence/
+│   └── tests/
+├── common/
+│   ├── src/common/
+│   └── tests/
+├── migrations/
 └── versions/
 ```
 
@@ -24,6 +27,11 @@ migrations/
 `uv.lock`과 `.venv`를 공유합니다.
 두 앱은 `quinquatria-persistence` workspace 패키지의 동일한 모델과
 DB 세션을 사용합니다. 공통 패키지는 FastAPI에 의존하지 않습니다.
+
+`common`은 배포되는 애플리케이션이 아니라 두 앱이 의존하는 라이브러리입니다.
+[API 명세](docs/API_SPEC.md) §2의 공통 규칙 - `/api/v1` 경로, enum, 공통 검증,
+페이지네이션, 오류 응답 - 을 구현하며 두 앱의 계약이 갈라지지 않게 합니다.
+자세한 내용은 [apps/common/README.md](apps/common/README.md)를 참고합니다.
 
 ## 개발 환경
 

@@ -3,7 +3,10 @@ name = "quinquatria-backend"
 version = "0.1.0"
 description = "Quinquatria backend monorepo"
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
+]
 
 [dependency-groups]
 dev = [
@@ -25,6 +28,7 @@ addopts = ["--import-mode=importlib", "-q"]
 testpaths = [
     "apps/backoffice/tests",
     "apps/customer/tests",
+    "packages/common/tests",
     "packages/persistence/tests",
 ]
 asyncio_mode = "auto"
@@ -35,6 +39,7 @@ target-version = "py314"
 src = [
     "apps/backoffice/src",
     "apps/customer/src",
+    "packages/common/src",
     "packages/persistence/src",
 ]
 

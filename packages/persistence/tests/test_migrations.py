@@ -39,9 +39,7 @@ def assert_schema(connection):
             assert columns["created_at"]["default"] is not None
         assert set(columns) == expected_fields
         assert {
-            (table, column["name"])
-            for column in columns.values()
-            if column["nullable"]
+            (table, column["name"]) for column in columns.values() if column["nullable"]
         } == {field for field in NULLABLE_IMAGE_COLUMNS if field[0] == table}
         for default_table, default_column in DEFAULT_EMPTY_COLUMNS:
             if default_table == table:

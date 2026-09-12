@@ -8,11 +8,13 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
+    "common",
     "fastapi[standard]>=0.141.1",
     "quinquatria-persistence",
 ]
 
 [tool.uv.sources]
+common = { workspace = true }
 quinquatria-persistence = { workspace = true }
 
 [tool.fastapi]

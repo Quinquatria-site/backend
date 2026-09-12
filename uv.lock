@@ -5,6 +5,7 @@ requires-python = ">=3.14"
 [manifest]
 members = [
     "backoffice",
+    "common",
     "customer",
     "quinquatria-backend",
     "quinquatria-persistence",
@@ -69,12 +70,14 @@ name = "backoffice"
 version = "0.1.0"
 source = { editable = "apps/backoffice" }
 dependencies = [
+    { name = "common" },
     { name = "fastapi", extra = ["standard"] },
     { name = "quinquatria-persistence" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "common", editable = "packages/common" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.141.1" },
     { name = "quinquatria-persistence", editable = "packages/persistence" },
 ]
@@ -201,16 +204,29 @@ wheels = [
 ]
 
 [[package]]
+name = "common"
+version = "0.1.0"
+source = { editable = "packages/common" }
+dependencies = [
+    { name = "fastapi" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "fastapi", specifier = ">=0.141.1" }]
+
+[[package]]
 name = "customer"
 version = "0.1.0"
 source = { editable = "apps/customer" }
 dependencies = [
+    { name = "common" },
     { name = "fastapi", extra = ["standard"] },
     { name = "quinquatria-persistence" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "common", editable = "packages/common" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.141.1" },
     { name = "quinquatria-persistence", editable = "packages/persistence" },
 ]
@@ -840,6 +856,10 @@ wheels = [
 name = "quinquatria-backend"
 version = "0.1.0"
 source = { virtual = "." }
+dependencies = [
+    { name = "httpx" },
+    { name = "pytest" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -851,6 +871,10 @@ dev = [
 ]
 
 [package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "pytest", specifier = ">=9.1.1" },
+]
 
 [package.metadata.requires-dev]
 dev = [
