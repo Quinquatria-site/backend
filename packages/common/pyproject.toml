@@ -1,0 +1,13 @@
+[project]
+name = "common"
+version = "0.1.0"
+description = "Customer와 Backoffice가 공유하는 API v1 계약과 오류 처리"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.141.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.11,<0.13.0"]
+build-backend = "uv_build"

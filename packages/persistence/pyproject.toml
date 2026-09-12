@@ -1,0 +1,13 @@
+[project]
+name = "quinquatria-persistence"
+version = "0.1.0"
+description = "Shared PostgreSQL models and async transactions for Quinquatria APIs"
+requires-python = ">=3.14"
+dependencies = [
+    "psycopg[binary]>=3.3,<4",
+    "sqlalchemy[asyncio]>=2.0.44,<2.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.11,<0.13.0"]
+build-backend = "uv_build"
