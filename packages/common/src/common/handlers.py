@@ -34,6 +34,7 @@ def _response(error: ApiError) -> JSONResponse:
     return JSONResponse(
         status_code=error.status_code,
         content=error.to_response().model_dump(mode="json"),
+        headers=error.headers,
     )
 
 
@@ -79,7 +80,7 @@ async def handle_http_exception(
 
     404 Not Found나 405 Method Not Allowed처럼 라우팅 단계에서 나오는 응답이
     여기에 해당한다. 명세에 없는 상태는 원래 상태를 유지한 채 가장 가까운
-    코드를 쓴다.
+    코드를 쓴다. 405의 `Allow`처럼 예외가 들고 온 헤더는 그대로 넘긴다.
     """
     code = _STATUS_CODE.get(exc.status_code)
     if code is None:
@@ -88,7 +89,7 @@ async def handle_http_exception(
             if exc.status_code < 500
             else ErrorCode.INTERNAL_SERVER_ERROR
         )
-    error = ApiError(code)
+    error = ApiError(code, headers=exc.headers)
     error.status_code = exc.status_code
     return _response(error)
 

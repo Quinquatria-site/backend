@@ -3,6 +3,7 @@
 응답 본문에는 내부 예외 메시지, SQL, stack trace, 비밀값을 포함하지 않는다.
 """
 
+from collections.abc import Mapping
 from enum import StrEnum
 from http import HTTPStatus
 
@@ -75,6 +76,9 @@ class ApiError(Exception):
 
     `code`가 HTTP 상태와 기본 메시지를 결정한다. 사용자에게 보여줄 구체적인
     설명이 있으면 `message`로 덮어쓴다.
+
+    `headers`는 405의 `Allow`처럼 상태 코드와 함께 보내야 하는 헤더를 싣는다.
+    전송 계층에만 쓰이고 §2.6 본문에는 들어가지 않는다.
     """
 
     def __init__(
@@ -83,11 +87,13 @@ class ApiError(Exception):
         *,
         message: str | None = None,
         details: list[ErrorDetail] | None = None,
+        headers: Mapping[str, str] | None = None,
     ) -> None:
         self.code = code
         self.status_code = _STATUS[code]
         self.message = message if message is not None else _MESSAGE[code]
         self.details = details if details is not None else []
+        self.headers = dict(headers) if headers else None
         super().__init__(self.message)
 
     def to_response(self) -> ErrorResponse:

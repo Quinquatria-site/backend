@@ -78,6 +78,28 @@ def test_response_is_serializable_without_details() -> None:
     )
 
 
+def test_headers_default_to_none() -> None:
+    assert ApiError(ErrorCode.RESOURCE_NOT_FOUND).headers is None
+
+
+def test_headers_are_copied_from_the_caller() -> None:
+    headers = {"Retry-After": "60"}
+    error = ApiError(ErrorCode.RATE_LIMIT_EXCEEDED, headers=headers)
+    headers["Retry-After"] = "1"
+
+    assert error.headers == {"Retry-After": "60"}
+
+
+def test_headers_stay_out_of_the_response_body() -> None:
+    error = ApiError(ErrorCode.INVALID_TOKEN, headers={"WWW-Authenticate": "Bearer"})
+
+    assert error.to_response().model_dump() == {
+        "code": "INVALID_TOKEN",
+        "message": "유효하지 않은 토큰입니다.",
+        "details": [],
+    }
+
+
 def test_api_error_is_an_exception() -> None:
     with pytest.raises(ApiError):
         raise ApiError(ErrorCode.INTERNAL_SERVER_ERROR)

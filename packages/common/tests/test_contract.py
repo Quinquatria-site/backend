@@ -64,6 +64,11 @@ async def create_notice(body: _NoticeCreate) -> dict:
     return {"type": body.type, "title": body.title}
 
 
+@router.get("/rate-limited")
+async def rate_limited() -> dict:
+    raise ApiError(ErrorCode.RATE_LIMIT_EXCEEDED, headers={"Retry-After": "60"})
+
+
 @router.get("/boom")
 async def boom() -> dict:
     raise RuntimeError("password=hunter2 SELECT * FROM notice")
@@ -215,6 +220,28 @@ def test_unknown_path_returns_the_spec_error_body() -> None:
 
     assert response.status_code == 404
     assert response.json()["code"] == ErrorCode.RESOURCE_NOT_FOUND
+
+
+def test_method_not_allowed_keeps_the_allow_header() -> None:
+    response = client.post("/api/v1/notices/1")
+
+    assert response.status_code == 405
+    assert "GET" in {method.strip() for method in response.headers["allow"].split(",")}
+    assert response.json()["code"] == ErrorCode.INVALID_REQUEST
+
+
+def test_api_error_headers_reach_the_response() -> None:
+    response = client.get("/api/v1/rate-limited")
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "60"
+    assert response.json()["code"] == ErrorCode.RATE_LIMIT_EXCEEDED
+
+
+def test_error_headers_do_not_replace_the_json_content_type() -> None:
+    response = client.get("/api/v1/rate-limited")
+
+    assert response.headers["content-type"] == "application/json"
 
 
 def test_no_content_response_has_no_body_or_content_type() -> None:
