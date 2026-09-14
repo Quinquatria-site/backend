@@ -2,7 +2,7 @@
 
 | 항목              | 값                           |
 | ----------------- | ---------------------------- |
-| 문서 버전         | v0.2                         |
+| 문서 버전         | v0.3                         |
 | 작성일            | 2026-09-09                   |
 | 최종 수정일       | 2026-09-14                   |
 | 기준 문서         | [PRD](./PRD.md)              |
@@ -770,9 +770,12 @@ object key는 참조가 제거된 객체로 보고 아래 수명 주기 규칙�
 | DELETE | `/{resource}/{id}`                              | `204`     | 영구 삭제                         |
 | DELETE | `/{resource}/{id}/translations/{language_code}` | `204`     | 선택 언어 번역 삭제               |
 
-Performance에는 위 공통 경로 외에 현재 공연 중 상태를 바꾸는
-`PUT /api/v1/performances/{performance_id}/live`가 추가로 있다. 자세한
-규칙은 5.6에 있다.
+Performance에는 위 공통 경로 외에 두 엔드포인트가 추가로 있다. 현재
+공연 중 상태를 바꾸는 `PUT /api/v1/performances/{performance_id}/live`와
+한 일차의 노출 순서를 한 번에 바꾸는
+`PUT /api/v1/performances/reorder`다. 자세한 규칙은 5.6에 있다.
+`reorder`는 정적 경로이므로 `{performance_id}`를 받는 경로보다 먼저
+등록한다.
 
 Backoffice 목록은 번역 유무와 관계없이 기본 리소스를 반환한다.
 `translations`는 `language_code ASC, id ASC`로 정렬한다.
@@ -984,7 +987,7 @@ Content-Type: application/json
 | `type`         | string enum              | 필수          | 선택                | 공연 유형                         |
 | `image_uri`    | string \| null           | 선택          | 선택                | 이미지 S3 key, 기본값 `null`      |
 | `date`         | date string              | 필수          | 선택                | 공연이 열리는 축제 일차           |
-| `seq`          | integer                  | 필수          | 선택                | 같은 일차 안의 노출 순서          |
+| `seq`          | integer                  | 보내지 않음   | 보내지 않음         | 같은 일차 안의 노출 순서          |
 | `is_live`      | boolean                  | 보내지 않음   | 보내지 않음         | 현재 공연 중 여부, 기본값 `false` |
 | `translations` | PerformanceTranslation[] | 필수, KO 포함 | 선택, 언어별 upsert | 전체 번역                         |
 
@@ -992,18 +995,28 @@ Content-Type: application/json
 
 - `date`는 `YYYY-MM-DD` 형식이어야 한다. 형식이 맞지 않으면
   `422 VALIDATION_ERROR`다.
-- `seq`는 1 이상의 정수다. 1 미만이면 `422 VALIDATION_ERROR`다.
-- `seq`에는 unique 제약을 두지 않는다. 일차가 다르면 같은 `seq` 값이
-  여러 공연에 반복되며, 같은 `date` 안에서 `seq`가 겹쳐도 API는 이를
-  거부하지 않는다. 이 경우 정렬은 `date ASC, seq ASC, id ASC`의
-  마지막 기준인 `id`로 결정된다.
-- 조회 정렬과 `date` 필터를 지원하기 위해 `PERFORMANCE`에 `(date, seq)`
-  복합 인덱스를 둔다. unique index가 아닌 일반 index다.
+- `seq`는 항상 1 이상의 정수다. 클라이언트가 값을 보내지 않으므로 이
+  범위는 서버가 보장한다.
+- `seq`는 같은 `date` 안에서 유일하다. 일차가 다르면 같은 `seq` 값이
+  여러 공연에 반복될 수 있다. 같은 `date` 안에서 `seq`가 겹치는 요청은
+  `422 VALIDATION_ERROR`다.
+- `seq`는 서버가 정한다. 생성 시 해당 `date`의 가장 큰 `seq`에 1을 더한
+  값을 받아 맨 뒤에 놓인다. `PATCH`로 `date`만 바꾸면 대상 일차의 맨
+  뒤로 옮겨진다. 운영자가 순서를 직접 바꾸는 수단은 아래 재정렬
+  엔드포인트뿐이다.
+- 한 일차의 `seq`는 빈틈 없이 `1`부터 연속이다. 공연이 어떤 일차에서
+  빠지면 그 일차의 남은 공연에 `1`부터 다시 매긴다. `DELETE`와, `PATCH`로
+  다른 일차에 옮겨 원래 일차에서 빠지는 경우가 모두 해당하며, 재배치는
+  해당 요청과 같은 transaction에서 처리한다.
+- 조회 정렬과 `date` 필터를 지원하고 위 유일성을 DB에서 보장하기 위해
+  `PERFORMANCE`에 `(date, seq)` unique index를 둔다. 재정렬이 한
+  transaction 안에서 여러 행의 `seq`를 맞바꾸므로, 중간 상태의 중복을
+  허용하고 commit 시점에만 검사하는 deferrable 제약으로 둔다.
 
-`is_live`는 요청 본문으로 설정하지 않는다. `POST`로 생성한 공연은 항상
-`is_live=false`로 시작하며, 값 변경은 아래 전용 엔드포인트로만 한다.
-`POST` 또는 `PATCH` 본문에 `is_live`를 포함하면
-`422 VALIDATION_ERROR`다. 응답에는 항상 포함한다.
+`seq`와 `is_live`는 요청 본문으로 설정하지 않는다. `POST`로 생성한
+공연은 항상 `is_live=false`로 시작하며, 값 변경은 아래 전용
+엔드포인트로만 한다. `POST` 또는 `PATCH` 본문에 `seq` 또는 `is_live`를
+포함하면 `422 VALIDATION_ERROR`다. 두 필드 모두 응답에는 항상 포함한다.
 
 `PerformanceTranslation`:
 
@@ -1021,7 +1034,6 @@ Content-Type: application/json
 {
     "type": "ARTIST",
     "date": "2026-10-06",
-    "seq": 3,
     "image_uri": "images/performance/550e8400-e29b-41d4-a716-446655440004.webp",
     "translations": [
         {
@@ -1087,6 +1099,66 @@ Content-Type: application/json
 생략하거나 boolean이 아닌 값을 보내면 `422 VALIDATION_ERROR`다. 이
 엔드포인트는 `is_live` 외의 필드를 받지 않으며 다른 필드를 보내면
 `422 VALIDATION_ERROR`다.
+
+commit이 성공하면 7.1의 자동 재검증 규칙에 따라 `PERFORMANCES` 대상
+ISR 재검증을 요청한다.
+
+#### PUT `/api/v1/performances/reorder`
+
+한 축제 일차의 공연 노출 순서를 한 번에 바꾼다. Bearer 인증이 필요하다.
+이 경로는 `/api/v1/performances/{performance_id}`보다 먼저 등록한다.
+
+요청:
+
+```json
+{
+    "date": "2026-10-06",
+    "order": [5, 30, 7, 12]
+}
+```
+
+| 필드    | 타입        | 필수 | 설명                                |
+| ------- | ----------- | ---- | ----------------------------------- |
+| `date`  | date string | 예   | 순서를 바꿀 축제 일차               |
+| `order` | integer[]   | 예   | 해당 일차 공연 ID를 원하는 순서대로 |
+
+클라이언트는 `seq` 값을 보내지 않는다. `order` 배열에서의 위치가 곧
+`seq`이며, 서버가 앞에서부터 `1`씩 증가시켜 다시 매긴다. 위 예시를 다음
+상태에 적용하면 이렇게 바뀐다.
+
+| `order` 위치 | id | 이전 `seq` | 이후 `seq` |
+| ------------ | -- | ---------- | ---------- |
+| 1번째        | 5  | 4          | 1          |
+| 2번째        | 30 | 2          | 2          |
+| 3번째        | 7  | 3          | 3          |
+| 4번째        | 12 | 1          | 4          |
+
+동작은 다음과 같다. 모든 변경은 하나의 DB transaction으로 처리한다.
+
+- `order`는 해당 `date`에 속한 공연 ID를 빠짐없이, 중복 없이, 그 일차의
+  공연만 담아야 한다. 어긋나면 `422 VALIDATION_ERROR`다. 일부만 보내면
+  빠진 공연의 `seq`를 정할 수 없으므로 부분 전송을 허용하지 않는다.
+- 이 검사는 동시 수정을 감지한다. 요청을 만든 뒤 다른 운영자가 해당
+  일차에 공연을 추가하거나 삭제했다면 배열이 어긋나 거부된다.
+- 같은 순서를 다시 보내는 것은 허용하며 결과는 동일하다.
+- `is_live`는 재정렬의 영향을 받지 않는다.
+
+`2026-10-06`에 공연 `5`, `7`, `12`, `30`이 있을 때 판정은 다음과 같다.
+
+| 보낸 `order`         | 결과  | 이유                          |
+| -------------------- | ----- | ----------------------------- |
+| `[5, 30, 7, 12]`     | `204` | 같은 집합, 순서만 다름        |
+| `[5, 30, 7]`         | `422` | `12`가 빠짐                   |
+| `[5, 30, 7, 12, 99]` | `422` | `99`는 이 일차에 없음         |
+| `[5, 5, 7, 12]`      | `422` | `5` 중복, `30` 누락           |
+| `[5, 30, 7, 44]`     | `422` | `44`는 다른 일차의 공연       |
+
+성공 응답은 `204 No Content`이며 본문이 없다. 서버가 `order` 순서대로
+`seq`를 매기므로 결과는 요청만으로 결정된다.
+
+`date` 형식이 `YYYY-MM-DD`가 아니거나 `order`가 비어 있으면
+`422 VALIDATION_ERROR`다. 이 엔드포인트는 `date`와 `order` 외의 필드를
+받지 않으며 다른 필드를 보내면 `422 VALIDATION_ERROR`다.
 
 commit이 성공하면 7.1의 자동 재검증 규칙에 따라 `PERFORMANCES` 대상
 ISR 재검증을 요청한다.
@@ -1202,7 +1274,7 @@ ISR 재검증을 요청한다.
 | Category    | CategoryTranslation은 연쇄 삭제한다. Place가 하나라도 있으면 `409 DELETE_CONFLICT`다.      |
 | Place       | PlaceTranslation, 하위 Menu, 각 MenuTranslation을 모두 연쇄 삭제한다.                      |
 | Menu        | MenuTranslation을 연쇄 삭제한다.                                                           |
-| Performance | PerformanceTranslation을 연쇄 삭제한다. `is_live=true`였다면 live 공연이 없는 상태가 된다. |
+| Performance | PerformanceTranslation을 연쇄 삭제한다. `is_live=true`였다면 live 공연이 없는 상태가 된다. 같은 일차의 남은 공연은 `seq`가 `1`부터 연속이 되도록 다시 매겨진다. |
 | Notice      | NoticeTranslation을 연쇄 삭제한다.                                                         |
 | LostItem    | LostItemTranslation을 연쇄 삭제한다.                                                       |
 
@@ -1229,9 +1301,9 @@ Category 삭제 충돌 예시:
 ### 7.1 자동 재검증
 
 Backoffice의 기본 리소스 `POST`, `PATCH`, `DELETE`, 번역 `DELETE`와
-현재 공연 중 상태를 바꾸는 `PUT /performances/{id}/live`가 DB
-transaction을 성공적으로 commit한 뒤 해당 Customer 페이지의 ISR 재검증을
-요청한다.
+현재 공연 중 상태를 바꾸는 `PUT /performances/{id}/live`, 일차 내 순서를
+바꾸는 `PUT /performances/reorder`가 DB transaction을 성공적으로 commit한
+뒤 해당 Customer 페이지의 ISR 재검증을 요청한다.
 
 | 변경 리소스           | 재검증 target  |
 | --------------------- | -------------- |
@@ -1302,8 +1374,9 @@ presigned PUT URL과 S3 object key를 반환하고, ERD에 이미 존재하는
 `PERFORMANCE`의 `start_at`과 `end_at`은 ERD에서 제거하고 `date`, `seq`,
 `is_live`로 대체한다. 공연 타임라인은 시각을 노출하지 않고 일차와 순서로
 구성하며, 현재 공연 중 표시는 시각 계산이 아니라 운영자가 갱신한
-`is_live` 값을 따른다. `PLACE`의 `start_hour`와 `end_hour`는 운영 시간
-정보이므로 그대로 유지한다.
+`is_live` 값을 따른다. `(date, seq)`에는 5.6의 규칙대로 deferrable unique
+제약을 둔다. `PLACE`의 `start_hour`와 `end_hour`는 운영 시간 정보이므로
+그대로 유지한다.
 
 ERD에는 구역 문자가 없으므로 API가 `A1`과 같은 구역 번호를 조합하지
 않는다. `category_sequence`, `x`, `y`만 반환하고 화면 표기 규칙은
@@ -1345,8 +1418,8 @@ ERD에는 구역 문자가 없으므로 API가 `A1`과 같은 구역 번호를 �
 15. 리소스에 연결되지 않거나 참조가 제거된 이미지는 24시간 유예 후
     cleanup 대상이 된다.
 16. 잘못된 enum, 중복 언어, 빈 `translations`, 역전된 Place의
-    `start_hour`·`end_hour`는 `422 VALIDATION_ERROR`다. 시작과 종료가
-    같은 값이면 허용된다.
+    `start_hour`·`end_hour`, 같은 `date` 안에서 겹치는 공연의 `seq`는
+    `422 VALIDATION_ERROR`다. 시작과 종료가 같은 값이면 허용된다.
 17. 이미지 필드를 생략하거나 `null`로 보낸 `POST`는 성공하고, 응답의
     해당 필드는 `null`이다.
 18. `place_image_uri`에 빈 배열 `[]`, `null` 원소 또는 중첩 배열을
@@ -1368,8 +1441,8 @@ ERD에는 구역 문자가 없으므로 API가 `A1`과 같은 구역 번호를 �
     `seq`, `is_live`가 포함된다.
 28. 공연 목록은 `date ASC, seq ASC, id ASC`로 정렬되며, `date` query를
     전달하면 해당 일차의 공연만 반환한다.
-29. 같은 `date`에 같은 `seq`를 쓰는 공연을 여러 개 만들 수 있고, 서로
-    다른 일차에 같은 `seq` 값이 반복되어도 `422`가 아니다.
+29. 같은 `date` 안에서 `seq`가 겹치는 요청은 `422 VALIDATION_ERROR`이며,
+    서로 다른 일차에 같은 `seq` 값이 반복되는 것은 허용한다.
 30. `PUT /performances/{id}/live`에 `true`를 보내면 대상 공연만
     `is_live=true`가 되고 기존 live 공연은 `false`로 바뀐다. 호출 이후
     전체 공연 중 `is_live=true`는 최대 1건이다.
@@ -1379,3 +1452,12 @@ ERD에는 구역 문자가 없으므로 API가 `A1`과 같은 구역 번호를 �
 32. `POST`로 만든 공연의 `is_live`는 `false`이며, `POST`나 `PATCH`
     본문에 `is_live`를 넣으면 `422 VALIDATION_ERROR`다.
 33. `is_live=true`인 공연을 `DELETE`하면 live 공연이 없는 상태가 된다.
+34. `PUT /performances/reorder`는 `order` 배열 순서대로 `seq`를 `1`부터
+    다시 매기고 `204 No Content`를 반환한다.
+35. `order`가 해당 일차의 공연 ID 집합과 다르면 `422 VALIDATION_ERROR`다.
+    ID 누락, 중복, 다른 일차의 ID, 존재하지 않는 ID가 모두 해당한다.
+36. `POST`나 `PATCH` 본문에 `seq`를 넣으면 `422 VALIDATION_ERROR`이고,
+    `POST`로 만든 공연은 해당 일차의 맨 뒤에 놓인다.
+37. `PATCH`로 `date`만 바꾸면 대상 일차의 맨 뒤로 옮겨진다.
+38. 공연을 `DELETE`하거나 `PATCH`로 다른 일차에 옮기면 원래 일차의 남은
+    공연이 `1`부터 연속이 되도록 다시 매겨진다.
