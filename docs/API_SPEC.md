@@ -2,8 +2,9 @@
 
 | 항목              | 값                           |
 | ----------------- | ---------------------------- |
-| 문서 버전         | v0.1                         |
+| 문서 버전         | v0.2                         |
 | 작성일            | 2026-09-09                   |
+| 최종 수정일       | 2026-09-14                   |
 | 기준 문서         | [PRD](./PRD.md)              |
 | 대상 애플리케이션 | Customer API, Backoffice API |
 | API 버전          | v1                           |
@@ -20,6 +21,10 @@ Backoffice API의 HTTP 계약을 정의한다.
   일반 공지 1건을 조회하는 API를 별도로 제공한다.
 - Backoffice API가 S3 presigned PUT URL과 object key를 발급하며,
   이미지가 있는 기본 리소스는 업로드가 끝난 해당 key를 저장한다.
+- 공연은 시작·종료 시각을 갖지 않는다. 축제 일차를 나타내는 `date`와
+  일차 안의 노출 순서를 나타내는 `seq`로 타임라인을 구성한다.
+- 현재 공연 중인 공연은 시각으로 계산하지 않는다. 현장에서 운영자가
+  Backoffice API로 갱신한 `is_live`만으로 판단한다.
 
 다음 기능은 이 API의 범위에 포함하지 않는다.
 
@@ -29,6 +34,12 @@ Backoffice API의 HTTP 계약을 정의한다.
 - 정적 편의시설 마커
 - 이미지 binary를 FastAPI로 전달하는 multipart/form-data 프록시 업로드
 - refresh token, access token 갱신, logout
+- 굿즈 사이트 링크. 굿즈 페이지가 연결할 외부 링크는 프론트엔드가
+  고정값으로 관리하며 API로 제공하거나 수정하지 않는다.
+- 언어 선택 토글의 아이콘 표기. 지구본 또는 `Language` 아이콘 사용은
+  프론트엔드 표현 규칙이며 `language_code` 계약과 무관하다.
+- 홈페이지 하단 크레딧. 표기할 내용과 배치는 프론트엔드가 정적으로
+  관리한다.
 
 ## 2. 공통 규칙
 
@@ -51,6 +62,9 @@ Customer API와 Backoffice API는 별도 FastAPI 애플리케이션으로 배포
 - ID는 1 이상의 정수다.
 - `datetime`은 UTC offset이 포함된 ISO 8601 문자열로 주고받는다.
   예: `2026-10-06T18:00:00+09:00`
+- `date`는 offset과 시각을 포함하지 않는 ISO 8601 local date 문자열이다.
+  형식은 `YYYY-MM-DD`이며 축제가 열리는 날짜를 의미한다.
+  예: `2026-10-06`
 - `price`는 원 단위의 0 이상 정수다.
 - `x`와 `y`는 지도 좌표를 나타내는 실수다. 좌표계와 유효 범위는
   프론트엔드 지도 에셋 계약에서 별도로 정한다.
@@ -161,19 +175,19 @@ stack trace, 비밀값은 응답에 포함하지 않는다.
 
 ### 3.1 엔드포인트 요약
 
-| Method | Path                                    | 지원 query parameter                           | 설명                     |
-| ------ | --------------------------------------- | ---------------------------------------------- | ------------------------ |
-| GET    | `/api/v1/categories`                    | `language_code`, `page`, `size`                | 카테고리 목록            |
-| GET    | `/api/v1/places`                        | `language_code`, `category_id`, `page`, `size` | 장소 목록                |
-| GET    | `/api/v1/places/{place_id}`             | `language_code`                                | 메뉴를 포함한 장소 상세  |
-| GET    | `/api/v1/performances`                  | `language_code`, `type`, `page`, `size`        | 공연 목록                |
-| GET    | `/api/v1/performances/{performance_id}` | `language_code`                                | 공연 상세                |
-| GET    | `/api/v1/notices`                       | `language_code`, `page`, `size`                | 일반 공지 목록           |
-| GET    | `/api/v1/notices/permanent`             | `language_code`, `page`, `size`                | 상시 공지 목록           |
-| GET    | `/api/v1/notices/latest`                | `language_code`                                | 가장 최근 일반 공지 1건  |
-| GET    | `/api/v1/notices/{notice_id}`           | `language_code`                                | 일반 또는 상시 공지 상세 |
-| GET    | `/api/v1/lost-items`                    | `language_code`, `is_returned`, `page`, `size` | 분실물 목록              |
-| GET    | `/api/v1/lost-items/{lost_item_id}`     | `language_code`                                | 분실물 상세              |
+| Method | Path                                    | 지원 query parameter                            | 설명                     |
+| ------ | --------------------------------------- | ----------------------------------------------- | ------------------------ |
+| GET    | `/api/v1/categories`                    | `language_code`, `page`, `size`                 | 카테고리 목록            |
+| GET    | `/api/v1/places`                        | `language_code`, `category_id`, `page`, `size`  | 장소 목록                |
+| GET    | `/api/v1/places/{place_id}`             | `language_code`                                 | 메뉴를 포함한 장소 상세  |
+| GET    | `/api/v1/performances`                  | `language_code`, `type`, `date`, `page`, `size` | 공연 목록                |
+| GET    | `/api/v1/performances/{performance_id}` | `language_code`                                 | 공연 상세                |
+| GET    | `/api/v1/notices`                       | `language_code`, `page`, `size`                 | 일반 공지 목록           |
+| GET    | `/api/v1/notices/permanent`             | `language_code`, `page`, `size`                 | 상시 공지 목록           |
+| GET    | `/api/v1/notices/latest`                | `language_code`                                 | 가장 최근 일반 공지 1건  |
+| GET    | `/api/v1/notices/{notice_id}`           | `language_code`                                 | 일반 또는 상시 공지 상세 |
+| GET    | `/api/v1/lost-items`                    | `language_code`, `is_returned`, `page`, `size`  | 분실물 목록              |
+| GET    | `/api/v1/lost-items/{lost_item_id}`     | `language_code`                                 | 분실물 상세              |
 
 위 표의 지원 query parameter 목록은 전체 목록이다. 단건 조회는
 `language_code`만 지원하며 `page`, `size`와 목록 filter를 받지 않는다.
@@ -305,13 +319,20 @@ Customer 카테고리 응답 필드는 다음과 같다.
 
 #### GET `/api/v1/performances`
 
-| query           | 타입        | 필수   | 설명           |
-| --------------- | ----------- | ------ | -------------- |
-| `language_code` | string enum | 아니요 | 기본값 `KO`    |
-| `type`          | string enum | 아니요 | 공연 유형 필터 |
+| query           | 타입        | 필수   | 설명                         |
+| --------------- | ----------- | ------ | ---------------------------- |
+| `language_code` | string enum | 아니요 | 기본값 `KO`                  |
+| `type`          | string enum | 아니요 | 공연 유형 필터               |
+| `date`          | date string | 아니요 | 해당 축제 일차의 공연만 조회 |
 
-정렬은 `start_at ASC, id ASC`다. 현재 공연 여부는 API가 계산하지 않고
-클라이언트가 `start_at`과 `end_at`으로 판별한다.
+정렬은 `date ASC, seq ASC, id ASC`다. `date`는 축제 일차를 구분하고
+`seq`는 같은 일차 안의 노출 순서를 정한다.
+
+공연 목록과 상세는 시작·종료 시각을 반환하지 않는다. 현재 공연 여부는
+API가 시각으로 계산하지 않고 운영자가 Backoffice API로 갱신한
+`is_live`로만 판단한다. 전체 공연 중 `is_live`가 `true`인 공연은 최대
+1건이며, 공연 사이에는 어느 공연도 `true`가 아닐 수 있다. 클라이언트는
+현재 시각과 무관하게 `is_live`를 그대로 사용한다.
 
 #### GET `/api/v1/performances/{performance_id}`
 
@@ -323,16 +344,40 @@ Customer 카테고리 응답 필드는 다음과 같다.
 
 공연 응답 필드는 다음과 같다.
 
-| 필드            | 타입            | 설명                                                                 |
-| --------------- | --------------- | -------------------------------------------------------------------- |
-| `id`            | integer         | 공연 ID                                                              |
-| `type`          | string enum     | `ARTIST`, `STUDENT` 또는 `SPECIAL`                                   |
-| `image_uri`     | string \| null  | `PERFORMANCE_IMAGE` 업로드로 받은 object key, 이미지가 없으면 `null` |
-| `start_at`      | datetime string | 공연 시작 시각                                                       |
-| `end_at`        | datetime string | 공연 종료 시각                                                       |
-| `language_code` | string enum     | 반환된 번역 언어                                                     |
-| `title`         | string          | 공연 또는 팀명                                                       |
-| `description`   | string          | 공연 설명                                                            |
+| 필드            | 타입           | 설명                                                                 |
+| --------------- | -------------- | -------------------------------------------------------------------- |
+| `id`            | integer        | 공연 ID                                                              |
+| `type`          | string enum    | `ARTIST`, `STUDENT` 또는 `SPECIAL`                                   |
+| `image_uri`     | string \| null | `PERFORMANCE_IMAGE` 업로드로 받은 object key, 이미지가 없으면 `null` |
+| `date`          | date string    | 공연이 열리는 축제 일차                                              |
+| `seq`           | integer        | 같은 일차 안의 노출 순서                                             |
+| `is_live`       | boolean        | 현재 공연 중 여부, 운영자가 Backoffice에서 갱신                      |
+| `language_code` | string enum    | 반환된 번역 언어                                                     |
+| `title`         | string         | 공연 또는 팀명                                                       |
+| `description`   | string         | 공연 설명                                                            |
+
+응답 예시:
+
+```json
+{
+    "items": [
+        {
+            "id": 12,
+            "type": "ARTIST",
+            "image_uri": "images/performance/550e8400-e29b-41d4-a716-446655440004.webp",
+            "date": "2026-10-06",
+            "seq": 3,
+            "is_live": true,
+            "language_code": "KO",
+            "title": "메인 스테이지 초청 공연",
+            "description": "초청 아티스트 무대입니다."
+        }
+    ],
+    "page": 1,
+    "size": 20,
+    "total": 1
+}
+```
 
 ### 3.5 공지
 
@@ -725,6 +770,10 @@ object key는 참조가 제거된 객체로 보고 아래 수명 주기 규칙�
 | DELETE | `/{resource}/{id}`                              | `204`     | 영구 삭제                         |
 | DELETE | `/{resource}/{id}/translations/{language_code}` | `204`     | 선택 언어 번역 삭제               |
 
+Performance에는 위 공통 경로 외에 현재 공연 중 상태를 바꾸는
+`PUT /api/v1/performances/{performance_id}/live`가 추가로 있다. 자세한
+규칙은 5.6에 있다.
+
 Backoffice 목록은 번역 유무와 관계없이 기본 리소스를 반환한다.
 `translations`는 `language_code ASC, id ASC`로 정렬한다.
 
@@ -739,7 +788,7 @@ Backoffice의 `GET /{resource}/{id}` 단건 조회는 query parameter를 받지
 | Category    | `code`            | `id ASC`                                         |
 | Place       | `category_id`     | `category_id ASC, category_sequence ASC, id ASC` |
 | Menu        | `place_id`        | `place_id ASC, id ASC`                           |
-| Performance | `type`            | `start_at ASC, id ASC`                           |
+| Performance | `type`, `date`    | `date ASC, seq ASC, id ASC`                      |
 | Notice      | `type`            | `created_at DESC, id DESC`                       |
 | LostItem    | `is_returned`     | `created_at DESC, id DESC`                       |
 
@@ -929,17 +978,32 @@ Content-Type: application/json
 
 기본 리소스:
 
-| 필드           | 타입                     | POST          | PATCH               | 설명                         |
-| -------------- | ------------------------ | ------------- | ------------------- | ---------------------------- |
-| `id`           | integer                  | 서버 생성     | 수정 불가           | 공연 ID                      |
-| `type`         | string enum              | 필수          | 선택                | 공연 유형                    |
-| `image_uri`    | string \| null           | 선택          | 선택                | 이미지 S3 key, 기본값 `null` |
-| `start_at`     | datetime string          | 필수          | 선택                | 공연 시작 시각               |
-| `end_at`       | datetime string          | 필수          | 선택                | 공연 종료 시각               |
-| `translations` | PerformanceTranslation[] | 필수, KO 포함 | 선택, 언어별 upsert | 전체 번역                    |
+| 필드           | 타입                     | POST          | PATCH               | 설명                              |
+| -------------- | ------------------------ | ------------- | ------------------- | --------------------------------- |
+| `id`           | integer                  | 서버 생성     | 수정 불가           | 공연 ID                           |
+| `type`         | string enum              | 필수          | 선택                | 공연 유형                         |
+| `image_uri`    | string \| null           | 선택          | 선택                | 이미지 S3 key, 기본값 `null`      |
+| `date`         | date string              | 필수          | 선택                | 공연이 열리는 축제 일차           |
+| `seq`          | integer                  | 필수          | 선택                | 같은 일차 안의 노출 순서          |
+| `is_live`      | boolean                  | 보내지 않음   | 보내지 않음         | 현재 공연 중 여부, 기본값 `false` |
+| `translations` | PerformanceTranslation[] | 필수, KO 포함 | 선택, 언어별 upsert | 전체 번역                         |
 
-`end_at`이 `start_at`보다 이르면 `422 VALIDATION_ERROR`다. 두 값이 같은
-것은 허용한다.
+`date`와 `seq` 규칙은 다음과 같다.
+
+- `date`는 `YYYY-MM-DD` 형식이어야 한다. 형식이 맞지 않으면
+  `422 VALIDATION_ERROR`다.
+- `seq`는 1 이상의 정수다. 1 미만이면 `422 VALIDATION_ERROR`다.
+- `seq`에는 unique 제약을 두지 않는다. 일차가 다르면 같은 `seq` 값이
+  여러 공연에 반복되며, 같은 `date` 안에서 `seq`가 겹쳐도 API는 이를
+  거부하지 않는다. 이 경우 정렬은 `date ASC, seq ASC, id ASC`의
+  마지막 기준인 `id`로 결정된다.
+- 조회 정렬과 `date` 필터를 지원하기 위해 `PERFORMANCE`에 `(date, seq)`
+  복합 인덱스를 둔다. unique index가 아닌 일반 index다.
+
+`is_live`는 요청 본문으로 설정하지 않는다. `POST`로 생성한 공연은 항상
+`is_live=false`로 시작하며, 값 변경은 아래 전용 엔드포인트로만 한다.
+`POST` 또는 `PATCH` 본문에 `is_live`를 포함하면
+`422 VALIDATION_ERROR`다. 응답에는 항상 포함한다.
 
 `PerformanceTranslation`:
 
@@ -950,6 +1014,82 @@ Content-Type: application/json
 | `language_code`  | string enum | 필수        | 포함 | 번역 언어                    |
 | `title`          | string      | 필수        | 포함 | 공연 또는 팀명               |
 | `description`    | string      | 선택        | 포함 | 공연 설명, 생략 시 빈 문자열 |
+
+생성 요청 예시:
+
+```json
+{
+    "type": "ARTIST",
+    "date": "2026-10-06",
+    "seq": 3,
+    "image_uri": "images/performance/550e8400-e29b-41d4-a716-446655440004.webp",
+    "translations": [
+        {
+            "language_code": "KO",
+            "title": "메인 스테이지 초청 공연",
+            "description": "초청 아티스트 무대입니다."
+        }
+    ]
+}
+```
+
+#### PUT `/api/v1/performances/{performance_id}/live`
+
+현장에서 운영자가 현재 공연 중인 공연을 갱신한다. Bearer 인증이
+필요하다.
+
+요청:
+
+```json
+{
+    "is_live": true
+}
+```
+
+| 필드      | 타입    | 필수 | 설명                       |
+| --------- | ------- | ---- | -------------------------- |
+| `is_live` | boolean | 예   | 대상 공연의 현재 공연 여부 |
+
+동작은 다음과 같다. 모든 변경은 하나의 DB transaction으로 처리한다.
+
+- `true`를 보내면 기존에 `is_live=true`였던 공연을 `false`로 내리고
+  경로의 공연만 `true`로 올린다. 그 결과 전체 공연 중 `is_live=true`는
+  항상 최대 1건이다.
+- `false`를 보내면 경로의 공연만 `false`로 내린다. 다른 공연을 대신
+  올리지 않으므로 어느 공연도 `is_live=true`가 아닌 상태가 된다.
+- 이미 같은 값인 공연에 같은 값을 다시 보내는 것은 허용하며 `200 OK`를
+  반환한다.
+
+성공 응답은 `200 OK`이며 갱신된 공연을 `translations`를 포함해 이 절의
+기본 리소스 형태로 반환한다.
+
+```json
+{
+    "id": 12,
+    "type": "ARTIST",
+    "image_uri": "images/performance/550e8400-e29b-41d4-a716-446655440004.webp",
+    "date": "2026-10-06",
+    "seq": 3,
+    "is_live": true,
+    "translations": [
+        {
+            "id": 301,
+            "performance_id": 12,
+            "language_code": "KO",
+            "title": "메인 스테이지 초청 공연",
+            "description": "초청 아티스트 무대입니다."
+        }
+    ]
+}
+```
+
+존재하지 않는 `performance_id`는 `404 RESOURCE_NOT_FOUND`다. `is_live`를
+생략하거나 boolean이 아닌 값을 보내면 `422 VALIDATION_ERROR`다. 이
+엔드포인트는 `is_live` 외의 필드를 받지 않으며 다른 필드를 보내면
+`422 VALIDATION_ERROR`다.
+
+commit이 성공하면 7.1의 자동 재검증 규칙에 따라 `PERFORMANCES` 대상
+ISR 재검증을 요청한다.
 
 ### 5.7 Notice 스키마
 
@@ -1057,14 +1197,14 @@ Content-Type: application/json
 
 모든 삭제는 soft delete가 아닌 영구 삭제다.
 
-| 삭제 대상   | 동작                                                                                  |
-| ----------- | ------------------------------------------------------------------------------------- |
-| Category    | CategoryTranslation은 연쇄 삭제한다. Place가 하나라도 있으면 `409 DELETE_CONFLICT`다. |
-| Place       | PlaceTranslation, 하위 Menu, 각 MenuTranslation을 모두 연쇄 삭제한다.                 |
-| Menu        | MenuTranslation을 연쇄 삭제한다.                                                      |
-| Performance | PerformanceTranslation을 연쇄 삭제한다.                                               |
-| Notice      | NoticeTranslation을 연쇄 삭제한다.                                                    |
-| LostItem    | LostItemTranslation을 연쇄 삭제한다.                                                  |
+| 삭제 대상   | 동작                                                                                       |
+| ----------- | ------------------------------------------------------------------------------------------ |
+| Category    | CategoryTranslation은 연쇄 삭제한다. Place가 하나라도 있으면 `409 DELETE_CONFLICT`다.      |
+| Place       | PlaceTranslation, 하위 Menu, 각 MenuTranslation을 모두 연쇄 삭제한다.                      |
+| Menu        | MenuTranslation을 연쇄 삭제한다.                                                           |
+| Performance | PerformanceTranslation을 연쇄 삭제한다. `is_live=true`였다면 live 공연이 없는 상태가 된다. |
+| Notice      | NoticeTranslation을 연쇄 삭제한다.                                                         |
+| LostItem    | LostItemTranslation을 연쇄 삭제한다.                                                       |
 
 존재하지 않는 ID의 삭제는 `404 RESOURCE_NOT_FOUND`다. 성공한 삭제는 빈
 본문의 `204 No Content`를 반환한다.
@@ -1088,9 +1228,10 @@ Category 삭제 충돌 예시:
 
 ### 7.1 자동 재검증
 
-Backoffice의 기본 리소스 `POST`, `PATCH`, `DELETE`와 번역 `DELETE`가
-DB transaction을 성공적으로 commit한 뒤 해당 Customer 페이지의 ISR
-재검증을 요청한다.
+Backoffice의 기본 리소스 `POST`, `PATCH`, `DELETE`, 번역 `DELETE`와
+현재 공연 중 상태를 바꾸는 `PUT /performances/{id}/live`가 DB
+transaction을 성공적으로 commit한 뒤 해당 Customer 페이지의 ISR 재검증을
+요청한다.
 
 | 변경 리소스           | 재검증 target  |
 | --------------------- | -------------- |
@@ -1145,7 +1286,7 @@ Bearer 인증이 필요하다.
 | PLACE_TRANSLATION       | `language_code`, `name`, `host_college`, `description`    | 자식 ID와 FK를 포함한 번역 배열 |
 | MENU                    | 장소 상세의 `menus`                                       | 독립 CRUD 리소스                |
 | MENU_TRANSLATION        | 메뉴 번역 필드 평탄화                                     | 자식 ID와 FK를 포함한 번역 배열 |
-| PERFORMANCE             | 선택 언어 공연 필드                                       | 기본 필드와 `translations`      |
+| PERFORMANCE             | 선택 언어 공연 필드와 `date`, `seq`, `is_live`            | 기본 필드와 `translations`      |
 | PERFORMANCE_TRANSLATION | `language_code`, `title`, `description`                   | 자식 ID와 FK를 포함한 번역 배열 |
 | NOTICE                  | 일반·상시 목록, 최근 일반 공지와 공통 상세                | 기본 필드와 `translations`      |
 | NOTICE_TRANSLATION      | `language_code`, `title`, `content`                       | 자식 ID와 FK를 포함한 번역 배열 |
@@ -1157,6 +1298,12 @@ presigned PUT URL과 S3 object key를 반환하고, ERD에 이미 존재하는
 `category_icon_uri`, `place_image_uri`, `image_url`, `image_uri` 필드가
 업로드 완료 후 해당 key를 저장한다. 이 네 필드는 모두 nullable이며
 이미지를 올리지 않은 행은 `null`로 남는다.
+
+`PERFORMANCE`의 `start_at`과 `end_at`은 ERD에서 제거하고 `date`, `seq`,
+`is_live`로 대체한다. 공연 타임라인은 시각을 노출하지 않고 일차와 순서로
+구성하며, 현재 공연 중 표시는 시각 계산이 아니라 운영자가 갱신한
+`is_live` 값을 따른다. `PLACE`의 `start_hour`와 `end_hour`는 운영 시간
+정보이므로 그대로 유지한다.
 
 ERD에는 구역 문자가 없으므로 API가 `A1`과 같은 구역 번호를 조합하지
 않는다. `category_sequence`, `x`, `y`만 반환하고 화면 표기 규칙은
@@ -1197,8 +1344,9 @@ ERD에는 구역 문자가 없으므로 API가 `A1`과 같은 구역 번호를 �
     `409 IMAGE_ALREADY_ATTACHED`다.
 15. 리소스에 연결되지 않거나 참조가 제거된 이미지는 24시간 유예 후
     cleanup 대상이 된다.
-16. 잘못된 enum, 중복 언어, 빈 `translations`, 역전된 시작·종료 시각은
-    `422 VALIDATION_ERROR`다. 시작과 종료가 같은 값이면 허용된다.
+16. 잘못된 enum, 중복 언어, 빈 `translations`, 역전된 Place의
+    `start_hour`·`end_hour`는 `422 VALIDATION_ERROR`다. 시작과 종료가
+    같은 값이면 허용된다.
 17. 이미지 필드를 생략하거나 `null`로 보낸 `POST`는 성공하고, 응답의
     해당 필드는 `null`이다.
 18. `place_image_uri`에 빈 배열 `[]`, `null` 원소 또는 중첩 배열을
@@ -1216,3 +1364,18 @@ ERD에는 구역 문자가 없으므로 API가 `A1`과 같은 구역 번호를 �
     삭제되지 않는다.
 26. Backoffice 쓰기 transaction이 commit된 뒤 올바른 ISR target의
     재검증이 요청된다.
+27. 공연 목록과 상세 응답에는 `start_at`과 `end_at`이 없고 `date`,
+    `seq`, `is_live`가 포함된다.
+28. 공연 목록은 `date ASC, seq ASC, id ASC`로 정렬되며, `date` query를
+    전달하면 해당 일차의 공연만 반환한다.
+29. 같은 `date`에 같은 `seq`를 쓰는 공연을 여러 개 만들 수 있고, 서로
+    다른 일차에 같은 `seq` 값이 반복되어도 `422`가 아니다.
+30. `PUT /performances/{id}/live`에 `true`를 보내면 대상 공연만
+    `is_live=true`가 되고 기존 live 공연은 `false`로 바뀐다. 호출 이후
+    전체 공연 중 `is_live=true`는 최대 1건이다.
+31. `PUT /performances/{id}/live`에 `false`를 보내면 어느 공연도
+    `is_live=true`가 아닌 상태가 되며, 다른 공연이 자동으로 승격되지
+    않는다.
+32. `POST`로 만든 공연의 `is_live`는 `false`이며, `POST`나 `PATCH`
+    본문에 `is_live`를 넣으면 `422 VALIDATION_ERROR`다.
+33. `is_live=true`인 공연을 `DELETE`하면 live 공연이 없는 상태가 된다.
