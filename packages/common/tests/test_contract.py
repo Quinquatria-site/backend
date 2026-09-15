@@ -1,9 +1,11 @@
 """API 명세 §2의 공통 규칙을 HTTP 수준에서 검증한다."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Annotated
 
 import pytest
-from fastapi import APIRouter, Query, Response, status
+from fastapi import APIRouter, FastAPI, Query, Response, status
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
@@ -270,3 +272,26 @@ def test_unhandled_exception_never_leaks_internals() -> None:
     assert "SELECT" not in body
     assert "RuntimeError" not in body
     assert "Traceback" not in body
+
+
+def test_create_api_app_runs_the_given_lifespan() -> None:
+    """앱이 연결 풀 같은 자원을 기동·종료 시점에 관리할 수 있어야 한다."""
+    events: list[str] = []
+
+    @asynccontextmanager
+    async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        events.append("startup")
+        yield
+        events.append("shutdown")
+
+    lifespan_app = create_api_app(title="Lifespan Test API", lifespan=lifespan)
+
+    with TestClient(lifespan_app):
+        assert events == ["startup"]
+
+    assert events == ["startup", "shutdown"]
+
+
+def test_create_api_app_works_without_a_lifespan() -> None:
+    with TestClient(create_api_app(title="No Lifespan API")):
+        pass
