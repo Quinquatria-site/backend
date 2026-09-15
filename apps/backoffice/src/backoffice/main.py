@@ -28,4 +28,5 @@ def create_app() -> FastAPI:
         title="Quinquatria Backoffice API", router=api_router, lifespan=lifespan
     )
 
+
 app = create_app()
