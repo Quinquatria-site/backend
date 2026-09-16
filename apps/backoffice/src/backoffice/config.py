@@ -20,12 +20,8 @@ class Settings(BaseSettings):
 
     issuance_code: SecretStr
     jwt_signing_key: SecretStr
-    redis_url: str
 
-    trusted_proxy_hops: int = Field(1, ge=0)
     token_ttl_seconds: int = Field(18000, ge=1)
-    rate_limit_max: int = Field(5, ge=1)
-    rate_limit_window_seconds: int = Field(60, ge=1)
 
     @field_validator("jwt_signing_key")
     @classmethod

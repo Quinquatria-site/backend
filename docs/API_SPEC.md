@@ -34,6 +34,8 @@ Backoffice API의 HTTP 계약을 정의한다.
 - 정적 편의시설 마커
 - 이미지 binary를 FastAPI로 전달하는 multipart/form-data 프록시 업로드
 - refresh token, access token 갱신, logout
+- 애플리케이션 계층의 요청 수 제한. 토큰 발급 제한은 reverse proxy
+  계층이 담당한다. §4.1 참조.
 - 굿즈 사이트 링크. 굿즈 페이지가 연결할 외부 링크는 프론트엔드가
   고정값으로 관리하며 API로 제공하거나 수정하지 않는다.
 - 언어 선택 토글의 아이콘 표기. 지구본 또는 `Language` 아이콘 사용은
@@ -170,6 +172,9 @@ stack trace, 비밀값은 응답에 포함하지 않는다.
 | `422`     | `INVALID_IMAGE`          | 이미지 형식, key, prefix 또는 S3 객체 검증 실패 |
 | `429`     | `RATE_LIMIT_EXCEEDED`    | 토큰 발급 요청 제한 초과                        |
 | `500`     | `INTERNAL_SERVER_ERROR`  | 공개할 수 없는 서버 내부 오류                   |
+
+`429 RATE_LIMIT_EXCEEDED`는 애플리케이션이 아니라 앞단의 reverse proxy
+계층이 생성한다. 본문 형식과 `code` 값은 위 계약과 동일하다. §4.1 참조.
 
 ## 3. Customer API
 
@@ -547,10 +552,18 @@ Backoffice는 단일 공유 발급 코드 방식으로 인증한다. 서버가 �
 발급 코드가 일치하지 않으면 `401 INVALID_CREDENTIALS`를 반환한다.
 발급 코드의 길이, 일부 문자, 일치 여부 같은 추가 정보는 노출하지 않는다.
 
-토큰 발급 요청은 신뢰하는 reverse proxy가 확정한 client IP를 기준으로
-rolling 60초 동안 최대 5회 허용한다. 성공과 실패 요청을 모두 집계한다.
-초과 시 `429 RATE_LIMIT_EXCEEDED`와 초 단위 `Retry-After` header를
-반환한다.
+토큰 발급 요청에는 client IP 기준 요청 수 제한을 적용한다. 성공과 실패
+요청을 모두 집계한다. 초과 시 `429 RATE_LIMIT_EXCEEDED`와 초 단위
+`Retry-After` header를 반환하며, 본문은 §2.6의 오류 응답 형식을 따른다.
+
+이 제한은 애플리케이션이 아니라 그 앞단의 reverse proxy 계층이 적용한다.
+FastAPI 애플리케이션은 제한을 구현하지 않으며, client IP 확정과 요청
+집계도 수행하지 않는다. 한도 수치, 윈도우 알고리즘, `Retry-After` 산출
+방식은 해당 계층의 설정으로 정하며 이 문서는 규정하지 않는다. 기준은
+IP당 분당 5회 수준으로 한다.
+
+제한이 설정되지 않은 환경에서는 이 엔드포인트가 무제한으로 노출된다.
+외부에 노출되는 배포는 이 제한의 설정을 전제로 한다.
 
 ### 4.2 JWT 계약
 

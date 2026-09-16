@@ -11,7 +11,6 @@ VALID_KEY = "k" * MIN_SIGNING_KEY_BYTES
 def _set_required(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BACKOFFICE_ISSUANCE_CODE", "code-from-env")
     monkeypatch.setenv("BACKOFFICE_JWT_SIGNING_KEY", VALID_KEY)
-    monkeypatch.setenv("BACKOFFICE_REDIS_URL", "redis://localhost:6379/0")
 
 
 def test_reads_secrets_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -21,7 +20,6 @@ def test_reads_secrets_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> 
 
     assert settings.issuance_code.get_secret_value() == "code-from-env"
     assert settings.jwt_signing_key.get_secret_value() == VALID_KEY
-    assert settings.redis_url == "redis://localhost:6379/0"
 
 
 def test_defaults_follow_the_spec(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -30,9 +28,6 @@ def test_defaults_follow_the_spec(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = Settings()
 
     assert settings.token_ttl_seconds == 18000
-    assert settings.rate_limit_max == 5
-    assert settings.rate_limit_window_seconds == 60
-    assert settings.trusted_proxy_hops == 1
 
 
 @pytest.mark.parametrize(
@@ -40,7 +35,6 @@ def test_defaults_follow_the_spec(monkeypatch: pytest.MonkeyPatch) -> None:
     [
         "BACKOFFICE_ISSUANCE_CODE",
         "BACKOFFICE_JWT_SIGNING_KEY",
-        "BACKOFFICE_REDIS_URL",
     ],
 )
 def test_missing_required_setting_fails_fast(

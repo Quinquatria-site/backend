@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from backoffice.auth.tokens import SUBJECT, verify_token
 from common.errors import ErrorCode
 
-from ._auth import ISSUANCE_CODE, SIGNING_KEY, DenyAll
+from ._auth import ISSUANCE_CODE, SIGNING_KEY
 
 PATH = "/api/v1/auth/token"
 
@@ -61,31 +61,3 @@ def test_unknown_query_parameter_is_rejected(client: TestClient) -> None:
 
     assert response.status_code == 422
     assert response.json()["code"] == ErrorCode.VALIDATION_ERROR
-
-
-def test_rate_limited_request_reports_retry_after(make_client) -> None:
-    limited = make_client(DenyAll(retry_after=37))
-
-    response = limited.post(PATH, json={"issuance_code": ISSUANCE_CODE})
-
-    assert response.status_code == 429
-    assert response.json()["code"] == ErrorCode.RATE_LIMIT_EXCEEDED
-    assert response.headers["retry-after"] == "37"
-
-
-def test_rate_limit_is_checked_before_the_code(make_client) -> None:
-    """실패 요청도 집계 대상이므로 코드 검증보다 먼저 걸려야 한다."""
-    limited = make_client(DenyAll())
-
-    response = limited.post(PATH, json={"issuance_code": "wrong-code"})
-
-    assert response.status_code == 429
-
-
-def test_rate_limit_counts_requests_with_an_invalid_body(make_client) -> None:
-    """본문이 잘못된 요청도 발급 시도이므로 집계한다."""
-    limited = make_client(DenyAll())
-
-    response = limited.post(PATH, json={})
-
-    assert response.status_code == 429
