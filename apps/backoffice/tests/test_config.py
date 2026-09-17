@@ -1,6 +1,8 @@
 """설정은 환경변수에서만 읽고, 값이 불완전하면 기동을 막아야 한다."""
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,6 +25,30 @@ LEAKY_CODE = "leakycode-000001"
 LEAKY_KEY_MARK = "leakykey"
 LEAKY_KEY = LEAKY_KEY_MARK.ljust(MIN_SIGNING_KEY_BYTES, "0")
 SHORT_LEAKY_KEY = LEAKY_KEY_MARK.ljust(MIN_SIGNING_KEY_BYTES - 1, "0")
+
+REQUIRED_SETTINGS = (
+    "BACKOFFICE_ISSUANCE_CODE",
+    "BACKOFFICE_JWT_SIGNING_KEY",
+    "BACKOFFICE_DATABASE_URL",
+    "BACKOFFICE_S3_BUCKET",
+    "BACKOFFICE_S3_REGION",
+)
+
+WEAK_SECRETS = (
+    ("BACKOFFICE_JWT_SIGNING_KEY", "short"),
+    ("BACKOFFICE_ISSUANCE_CODE", "short"),
+    ("BACKOFFICE_ISSUANCE_CODE", "code with spaces"),
+)
+
+
+@contextmanager
+def _fresh_settings() -> Iterator[None]:
+    """`get_settings`는 캐시되므로 앞선 테스트의 성공한 설정이 남지 않게 한다."""
+    get_settings.cache_clear()
+    try:
+        yield
+    finally:
+        get_settings.cache_clear()
 
 
 def _set_required(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -52,16 +78,7 @@ def test_defaults_follow_the_spec(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.token_ttl_seconds == 18000
 
 
-@pytest.mark.parametrize(
-    "missing",
-    [
-        "BACKOFFICE_ISSUANCE_CODE",
-        "BACKOFFICE_JWT_SIGNING_KEY",
-        "BACKOFFICE_DATABASE_URL",
-        "BACKOFFICE_S3_BUCKET",
-        "BACKOFFICE_S3_REGION",
-    ],
-)
+@pytest.mark.parametrize("missing", REQUIRED_SETTINGS)
 def test_missing_required_setting_fails_fast(
     monkeypatch: pytest.MonkeyPatch, missing: str
 ) -> None:
@@ -188,16 +205,7 @@ def test_rejected_secret_does_not_leak_through_the_validation_error(
     assert secret not in rendered
 
 
-@pytest.mark.parametrize(
-    "missing",
-    [
-        "BACKOFFICE_ISSUANCE_CODE",
-        "BACKOFFICE_JWT_SIGNING_KEY",
-        "BACKOFFICE_DATABASE_URL",
-        "BACKOFFICE_S3_BUCKET",
-        "BACKOFFICE_S3_REGION",
-    ],
-)
+@pytest.mark.parametrize("missing", REQUIRED_SETTINGS)
 def test_missing_setting_does_not_leak_the_other_secrets(
     monkeypatch: pytest.MonkeyPatch, missing: str
 ) -> None:
@@ -239,6 +247,64 @@ def test_settings_failure_during_a_request_does_not_log_the_secret(
     assert LEAKY_KEY_MARK not in caplog.text
     assert LEAKY_CODE not in response.text
     assert LEAKY_KEY_MARK not in response.text
+
+
+@pytest.mark.parametrize("missing", REQUIRED_SETTINGS)
+def test_app_start_fails_when_a_required_setting_is_missing(
+    monkeypatch: pytest.MonkeyPatch, missing: str
+) -> None:
+    _set_required(monkeypatch)
+    monkeypatch.delenv(missing)
+
+    with _fresh_settings(), pytest.raises(ValidationError), TestClient(create_app()):
+        pass
+
+
+@pytest.mark.parametrize(("broken", "value"), WEAK_SECRETS)
+def test_app_start_fails_when_a_secret_is_weak(
+    monkeypatch: pytest.MonkeyPatch, broken: str, value: str
+) -> None:
+    _set_required(monkeypatch)
+    monkeypatch.setenv(broken, value)
+
+    with _fresh_settings(), pytest.raises(ValidationError), TestClient(create_app()):
+        pass
+
+
+def test_health_check_cannot_pass_on_a_misconfigured_instance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """설정이 잘못된 인스턴스가 헬스체크를 통과하면 배포가 그대로 올라간다."""
+    for name in REQUIRED_SETTINGS:
+        monkeypatch.delenv(name, raising=False)
+
+    with _fresh_settings(), pytest.raises(ValidationError):
+        with TestClient(create_app()) as client:
+            client.get("/api/v1/")
+
+
+def test_app_starts_and_serves_the_health_check_with_valid_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_required(monkeypatch)
+
+    with _fresh_settings(), TestClient(create_app()) as client:
+        assert client.get("/api/v1/").status_code == 200
+
+
+def test_start_failure_does_not_log_the_secret(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _set_required(monkeypatch)
+    monkeypatch.setenv("BACKOFFICE_ISSUANCE_CODE", LEAKY_CODE)
+    monkeypatch.setenv("BACKOFFICE_JWT_SIGNING_KEY", SHORT_LEAKY_KEY)
+
+    with _fresh_settings(), caplog.at_level(logging.DEBUG):
+        with pytest.raises(ValidationError), TestClient(create_app()):
+            pass
+
+    assert LEAKY_CODE not in caplog.text
+    assert LEAKY_KEY_MARK not in caplog.text
 
 
 def test_get_settings_is_cached(monkeypatch: pytest.MonkeyPatch) -> None:
