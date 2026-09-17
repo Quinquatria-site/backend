@@ -16,6 +16,9 @@ def settings() -> Settings:
     return Settings(
         issuance_code=SecretStr(ISSUANCE_CODE),
         jwt_signing_key=SecretStr(SIGNING_KEY),
+        database_url="postgresql+psycopg://unused-in-contract-tests/quinquatria",
+        s3_bucket="test-bucket",
+        s3_region="ap-northeast-2",
     )
 
 
