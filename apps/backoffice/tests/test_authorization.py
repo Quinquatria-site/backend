@@ -11,11 +11,12 @@ from typing import Annotated
 import pytest
 from fastapi import APIRouter, Depends, Query
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from backoffice.api.router import PUBLIC_PATHS, api_router
 from backoffice.auth.dependencies import require_admin
 from backoffice.auth.tokens import issue_token
-from backoffice.config import get_settings
+from backoffice.config import Settings, get_settings
 from common.app import create_api_app
 from common.query import NoQuery
 
@@ -24,9 +25,7 @@ from ._auth import OTHER_SIGNING_KEY, SIGNING_KEY
 PROTECTED_PATH = "/api/v1/needs-admin"
 
 
-@pytest.fixture
-def protected_client(settings) -> TestClient:
-    """require_admin이 걸린 임시 라우트로 의존성 자체를 검증한다."""
+def _protected_client(settings: Settings) -> TestClient:
     guarded = APIRouter(dependencies=[Depends(require_admin)])
 
     @guarded.get("/needs-admin")
@@ -36,6 +35,12 @@ def protected_client(settings) -> TestClient:
     application = create_api_app(title="Authorization Test API", router=guarded)
     application.dependency_overrides[get_settings] = lambda: settings
     return TestClient(application)
+
+
+@pytest.fixture
+def protected_client(settings: Settings) -> TestClient:
+    """require_admin이 걸린 임시 라우트로 의존성 자체를 검증한다."""
+    return _protected_client(settings)
 
 
 def _bearer(token: str) -> dict[str, str]:
@@ -104,6 +109,46 @@ def test_token_signed_with_another_key_is_rejected(
     )
 
     response = protected_client.get(PROTECTED_PATH, headers=_bearer(forged))
+
+    assert response.status_code == 401
+
+
+ROTATED_CODE = "rotated-issuance-code"
+
+
+def test_rotating_only_the_issuance_code_leaves_existing_tokens_valid(
+    settings: Settings,
+) -> None:
+    """명세 §4.4가 허용한 지연이다. 코드 교체는 신규 발급만 차단한다."""
+    issued_before = issue_token(
+        signing_key=SIGNING_KEY, now=datetime.now(UTC), ttl_seconds=18000
+    )
+    rotated = settings.model_copy(update={"issuance_code": SecretStr(ROTATED_CODE)})
+
+    response = _protected_client(rotated).get(
+        PROTECTED_PATH, headers=_bearer(issued_before)
+    )
+
+    assert response.status_code == 200
+
+
+def test_rotating_the_signing_key_revokes_existing_tokens(
+    settings: Settings,
+) -> None:
+    """명세 §4.4의 즉시 폐기. 서명 키까지 바꿔야 기존 토큰이 끊긴다."""
+    issued_before = issue_token(
+        signing_key=SIGNING_KEY, now=datetime.now(UTC), ttl_seconds=18000
+    )
+    rotated = settings.model_copy(
+        update={
+            "issuance_code": SecretStr(ROTATED_CODE),
+            "jwt_signing_key": SecretStr(OTHER_SIGNING_KEY),
+        }
+    )
+
+    response = _protected_client(rotated).get(
+        PROTECTED_PATH, headers=_bearer(issued_before)
+    )
 
     assert response.status_code == 401
 
