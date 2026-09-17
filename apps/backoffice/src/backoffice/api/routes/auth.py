@@ -9,7 +9,7 @@ from hmac import compare_digest
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Response
-from pydantic import BaseModel, SecretStr
+from pydantic import BaseModel, ConfigDict, SecretStr
 
 from backoffice.auth.dependencies import SettingsDep
 from backoffice.auth.tokens import issue_token
@@ -23,7 +23,12 @@ _NO_STORE = {"Cache-Control": "no-store", "Pragma": "no-cache"}
 
 
 class TokenRequest(BaseModel):
-    """`SecretStr`이라 검증 오류 메시지에 값이 실리지 않는다."""
+    """`SecretStr`은 값을 읽는 쪽만 가리고, 검증 오류는 원본 입력을 그대로 싣는다.
+
+    요청 경로의 방어는 `common.handlers.handle_validation_error`가 맡는다.
+    """
+
+    model_config = ConfigDict(hide_input_in_errors=True)
 
     issuance_code: SecretStr
 

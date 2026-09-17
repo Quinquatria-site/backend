@@ -1,6 +1,9 @@
 """설정은 환경변수에서만 읽고, 값이 불완전하면 기동을 막아야 한다."""
 
+import logging
+
 import pytest
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from backoffice.config import (
@@ -10,9 +13,16 @@ from backoffice.config import (
     Settings,
     get_settings,
 )
+from backoffice.main import create_app
 
 VALID_KEY = "k" * MIN_SIGNING_KEY_BYTES
 VALID_CODE = "issuance-code-from-env"
+
+# Pydantic이 오류 문자열의 입력값을 잘라내므로 표시값을 값의 맨 앞에 둔다.
+LEAKY_CODE = "leakycode-000001"
+LEAKY_KEY_MARK = "leakykey"
+LEAKY_KEY = LEAKY_KEY_MARK.ljust(MIN_SIGNING_KEY_BYTES, "0")
+SHORT_LEAKY_KEY = LEAKY_KEY_MARK.ljust(MIN_SIGNING_KEY_BYTES - 1, "0")
 
 
 def _set_required(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -153,6 +163,82 @@ def test_secrets_do_not_leak_through_repr(monkeypatch: pytest.MonkeyPatch) -> No
 
     assert VALID_CODE not in rendered
     assert VALID_KEY not in rendered
+
+
+@pytest.mark.parametrize(
+    ("broken", "secret"),
+    [
+        ("BACKOFFICE_JWT_SIGNING_KEY", "short"),
+        ("BACKOFFICE_ISSUANCE_CODE", "short"),
+        ("BACKOFFICE_ISSUANCE_CODE", "code with spaces"),
+    ],
+)
+def test_rejected_secret_does_not_leak_through_the_validation_error(
+    monkeypatch: pytest.MonkeyPatch, broken: str, secret: str
+) -> None:
+    """예외 문자열에 값이 실리면 예외를 기록하는 모든 곳이 유출 경로가 된다."""
+    _set_required(monkeypatch)
+    monkeypatch.setenv(broken, secret)
+
+    with pytest.raises(ValidationError) as raised:
+        Settings()
+
+    rendered = str(raised.value) + repr(raised.value)
+    assert "input_value" not in rendered
+    assert secret not in rendered
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [
+        "BACKOFFICE_ISSUANCE_CODE",
+        "BACKOFFICE_JWT_SIGNING_KEY",
+        "BACKOFFICE_DATABASE_URL",
+        "BACKOFFICE_S3_BUCKET",
+        "BACKOFFICE_S3_REGION",
+    ],
+)
+def test_missing_setting_does_not_leak_the_other_secrets(
+    monkeypatch: pytest.MonkeyPatch, missing: str
+) -> None:
+    """`missing` 오류의 입력값은 필드 하나가 아니라 설정 전체 dict다."""
+    _set_required(monkeypatch)
+    monkeypatch.setenv("BACKOFFICE_ISSUANCE_CODE", LEAKY_CODE)
+    monkeypatch.setenv("BACKOFFICE_JWT_SIGNING_KEY", LEAKY_KEY)
+    monkeypatch.delenv(missing)
+
+    with pytest.raises(ValidationError) as raised:
+        Settings()
+
+    rendered = str(raised.value) + repr(raised.value)
+    assert "input_value" not in rendered
+    assert LEAKY_CODE not in rendered
+    assert LEAKY_KEY_MARK not in rendered
+
+
+def test_settings_failure_during_a_request_does_not_log_the_secret(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """설정은 지연 로드되므로 검증 실패가 요청 처리 중의 예외 로그로 흘러나온다."""
+    _set_required(monkeypatch)
+    monkeypatch.setenv("BACKOFFICE_ISSUANCE_CODE", LEAKY_CODE)
+    monkeypatch.setenv("BACKOFFICE_JWT_SIGNING_KEY", SHORT_LEAKY_KEY)
+    get_settings.cache_clear()
+
+    client = TestClient(create_app(), raise_server_exceptions=False)
+    try:
+        with caplog.at_level(logging.DEBUG):
+            response = client.post(
+                "/api/v1/auth/token", json={"issuance_code": LEAKY_CODE}
+            )
+    finally:
+        get_settings.cache_clear()
+
+    assert response.status_code == 500
+    assert LEAKY_CODE not in caplog.text
+    assert LEAKY_KEY_MARK not in caplog.text
+    assert LEAKY_CODE not in response.text
+    assert LEAKY_KEY_MARK not in response.text
 
 
 def test_get_settings_is_cached(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -25,7 +25,11 @@ class Settings(BaseSettings):
     # 정적 AWS access key를 받지 않는다. 서명은 workload IAM role의 임시
     # credential로 하며, 키를 설정에 두면 유출 시 만료가 없다.
 
-    model_config = SettingsConfigDict(env_prefix="BACKOFFICE_")
+    # 검증 오류는 `SecretStr`로 감싸기 전의 원본 입력을 싣고, `missing` 오류는
+    # 설정 전체 dict를 싣는다. 설정은 지연 로드되므로 예외 로그로 흘러나간다.
+    model_config = SettingsConfigDict(
+        env_prefix="BACKOFFICE_", hide_input_in_errors=True
+    )
 
     issuance_code: SecretStr
     jwt_signing_key: SecretStr
