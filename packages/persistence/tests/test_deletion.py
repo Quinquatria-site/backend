@@ -70,7 +70,10 @@ async def test_place_delete_cascades_menus_and_all_their_translations(
             await session.delete(place)
     expected = dict.fromkeys(TABLES, 1)
     expected.update(
-        dict.fromkeys(("place", "place_translation", "menu", "menu_translation"), 0)
+        dict.fromkeys(
+            ("place", "place_translation", "place_image", "menu", "menu_translation"),
+            0,
+        )
     )
     assert await counts(database) == expected
 

@@ -7,7 +7,7 @@
 
 from fastapi import APIRouter, Depends
 
-from backoffice.api.routes import auth, root
+from backoffice.api.routes import auth, root, uploads
 from backoffice.auth.dependencies import require_admin
 
 PUBLIC_PATHS = frozenset({"/api/v1/", "/api/v1/auth/token"})
@@ -18,7 +18,8 @@ public_router.include_router(root.router)
 public_router.include_router(auth.router)
 
 protected_router = APIRouter(dependencies=[Depends(require_admin)])
-"""#3, #4, #5, #7, #9, #12의 리소스 라우터가 등록될 자리."""
+"""#3, #4, #5, #7, #12의 리소스 라우터가 등록될 자리."""
+protected_router.include_router(uploads.router)
 
 api_router = APIRouter()
 api_router.include_router(public_router)

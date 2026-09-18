@@ -1,15 +1,17 @@
-"""All database access is confined to a disposable PostgreSQL container."""
+"""All database access is confined to a disposable PostgreSQL container.
+
+``postgres_url`` and ``migrated_url`` live in the repository root conftest so the
+backoffice image tests share one container with these tests.
+"""
 
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
-from testcontainers.community.postgres import PostgresContainer
 
 from quinquatria_persistence import Database
 
@@ -18,30 +20,9 @@ from ._data import TABLES, VALID_ROWS, insert_row
 ROOT = Path(__file__).resolve().parents[3]
 
 
-@pytest.fixture(scope="session")
-def postgres_url():
-    # Testcontainers' generated local test connection is the only URL used here.
-    # A missing Docker daemon must fail these integration tests, never skip them.
-    with PostgresContainer("postgres:18", driver="psycopg") as postgres:
-        yield postgres.get_connection_url()
-
-
 @pytest.fixture
 def alembic_config():
     return Config(str(ROOT / "alembic.ini"))
-
-
-@pytest.fixture(scope="session")
-def migrated_url(postgres_url):
-    engine = create_engine(postgres_url)
-    try:
-        with engine.begin() as connection:
-            config = Config(str(ROOT / "alembic.ini"))
-            config.attributes["connection"] = connection
-            command.upgrade(config, "head")
-        yield postgres_url
-    finally:
-        engine.dispose()
 
 
 @pytest.fixture
