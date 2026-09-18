@@ -10,18 +10,12 @@ from pydantic import ValidationError
 
 from backoffice.config import (
     MAX_IMAGE_BYTES,
-<<<<<<< HEAD
-=======
     MIN_ISSUANCE_CODE_LENGTH,
->>>>>>> b6d87efd8ca25d827a2d005f9f426d401bb4dc32
     MIN_SIGNING_KEY_BYTES,
     Settings,
     get_settings,
 )
-<<<<<<< HEAD
-=======
 from backoffice.main import create_app
->>>>>>> b6d87efd8ca25d827a2d005f9f426d401bb4dc32
 
 VALID_KEY = "k" * MIN_SIGNING_KEY_BYTES
 VALID_CODE = "issuance-code-from-env"
@@ -35,7 +29,8 @@ SHORT_LEAKY_KEY = LEAKY_KEY_MARK.ljust(MIN_SIGNING_KEY_BYTES - 1, "0")
 REQUIRED_SETTINGS = (
     "BACKOFFICE_ISSUANCE_CODE",
     "BACKOFFICE_JWT_SIGNING_KEY",
-    "BACKOFFICE_DATABASE_URL",
+    # DB는 Customer와 공유하므로 앱 prefix를 붙이지 않는다.
+    "DATABASE_URL",
     "BACKOFFICE_S3_BUCKET",
     "BACKOFFICE_S3_REGION",
 )
@@ -63,14 +58,8 @@ DATABASE_URL = "postgresql+psycopg://user:pw@localhost/quinquatria"
 def _set_required(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BACKOFFICE_ISSUANCE_CODE", VALID_CODE)
     monkeypatch.setenv("BACKOFFICE_JWT_SIGNING_KEY", VALID_KEY)
-<<<<<<< HEAD
     # DB는 Customer와 공유하므로 앱 prefix를 붙이지 않는다.
     monkeypatch.setenv("DATABASE_URL", DATABASE_URL)
-=======
-    monkeypatch.setenv(
-        "BACKOFFICE_DATABASE_URL", "postgresql+psycopg://user:pw@localhost/quinquatria"
-    )
->>>>>>> b6d87efd8ca25d827a2d005f9f426d401bb4dc32
     monkeypatch.setenv("BACKOFFICE_S3_BUCKET", "quinquatria-assets")
     monkeypatch.setenv("BACKOFFICE_S3_REGION", "ap-northeast-2")
 
@@ -92,20 +81,7 @@ def test_defaults_follow_the_spec(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.token_ttl_seconds == 18000
 
 
-<<<<<<< HEAD
-@pytest.mark.parametrize(
-    "missing",
-    [
-        "BACKOFFICE_ISSUANCE_CODE",
-        "BACKOFFICE_JWT_SIGNING_KEY",
-        "DATABASE_URL",
-        "BACKOFFICE_S3_BUCKET",
-        "BACKOFFICE_S3_REGION",
-    ],
-)
-=======
 @pytest.mark.parametrize("missing", REQUIRED_SETTINGS)
->>>>>>> b6d87efd8ca25d827a2d005f9f426d401bb4dc32
 def test_missing_required_setting_fails_fast(
     monkeypatch: pytest.MonkeyPatch, missing: str
 ) -> None:
@@ -361,7 +337,6 @@ def test_max_image_bytes_is_ten_mebibytes() -> None:
     assert MAX_IMAGE_BYTES == 10 * 1024 * 1024
 
 
-<<<<<<< HEAD
 def test_database_url_is_read_without_the_app_prefix(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -388,10 +363,6 @@ def test_prefixed_database_url_is_ignored(monkeypatch: pytest.MonkeyPatch) -> No
 def test_static_aws_credentials_are_not_configurable() -> None:
     """workload IAM role만 쓰므로 정적 키를 받는 입구를 두지 않는다."""
     # 인스턴스의 `model_fields` 접근은 Pydantic V3에서 제거되므로 클래스에서 읽는다.
-=======
-def test_static_aws_credentials_are_not_configurable() -> None:
-    """workload IAM role만 쓰므로 정적 키를 받는 입구를 두지 않는다."""
->>>>>>> b6d87efd8ca25d827a2d005f9f426d401bb4dc32
     fields = set(Settings.model_fields)
 
     assert not {name for name in fields if "access_key" in name or "secret" in name}
