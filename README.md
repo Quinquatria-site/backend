@@ -25,8 +25,9 @@ migrations/
 
 각 앱은 독립적인 Python 패키지와 의존성 선언을 가지며, 저장소 루트의
 `uv.lock`과 `.venv`를 공유합니다.
-두 앱은 `quinquatria-persistence` workspace 패키지의 동일한 모델과
-DB 세션을 사용합니다. persistence 패키지는 FastAPI에 의존하지 않습니다.
+두 앱은 `quinquatria-persistence` workspace 패키지의 모델과 DB 세션을
+공유합니다. Customer 공연 조회는 Backoffice가 준비한 Core 읽기 열을
+사용합니다. persistence 패키지는 FastAPI에 의존하지 않습니다.
 
 `common`은 배포되는 애플리케이션이 아니라 두 앱이 의존하는 라이브러리입니다.
 [API 명세](docs/API_SPEC.md) §2의 공통 규칙 - `/api/v1` 경로, enum, 공통 검증,
@@ -108,10 +109,10 @@ uv run --all-packages alembic check
 `alembic downgrade base`는 이 테이블의 데이터까지 제거하므로 임시 DB에서
 마이그레이션 왕복 검증을 할 때만 사용합니다.
 
-스키마를 변경할 때는 모델과 함께 새 Alembic revision을 추가합니다.
-기존 revision은 당시의 스키마를 보존하며 현재 모델에서 DDL을 재생성하지
-않습니다. 통합 테스트는 `upgrade`, 재실행, `downgrade` 후 재적용과
-모델 메타데이터의 일치를 검사합니다.
+스키마를 변경할 때는 Backoffice 모델과 함께 새 Alembic revision을 추가하며,
+이미 배포된 revision은 보존합니다. Customer 공연 조회는 Backoffice가
+`date`, `seq`, `is_live` 열을 실제 DB에 반영한 뒤에만 동작합니다. Customer는
+이 스키마를 생성·변환하거나 데이터를 backfill하지 않습니다.
 
 ## 공통 세션과 트랜잭션
 
@@ -124,7 +125,7 @@ DB 연결은 실제 조회 시 이루어지며 시작 시 마이그레이션을 
 Customer는 `database.session()`으로 조회만 수행합니다. 스키마 반영과
 `database.transaction()`을 사용하는 쓰기 작업은 Backoffice가 담당합니다.
 
-Customer의 카테고리·장소·메뉴 조회 경로와 다국어 규칙은
+Customer의 카테고리·장소·메뉴·공연 조회 경로와 다국어 규칙은
 [Customer README](apps/customer/README.md)에 정리되어 있습니다.
 
 Backoffice 쓰기 작업은 다음처럼 하나의 transaction에 관련 변경을 묶습니다.
