@@ -71,7 +71,8 @@ Customer API와 Backoffice API는 별도 FastAPI 애플리케이션으로 배포
 - `x`와 `y`는 지도 좌표를 나타내는 실수다. 좌표계와 유효 범위는
   프론트엔드 지도 에셋 계약에서 별도로 정한다.
 - 이미지 필드는 Backoffice 이미지 업로드 API가 반환한 S3 object key를
-  저장하고 반환한다. 리소스 생성·수정 시 API가 객체 존재 여부, 용도별
+  주고받는다. 저장은 내부 `IMAGE` 엔티티 참조로 하며 `image_id`는 API에
+  노출하지 않는다. 리소스 생성·수정 시 API가 객체 존재 여부, 용도별
   prefix, content type과 크기를 검증한다.
 - 모든 이미지 필드는 선택이다. 이미지를 올리지 않은 리소스는 해당
   필드가 `null`이다. `POST`에서 생략하거나 `null`을 보낼 수 있고,
@@ -773,6 +774,24 @@ object key는 참조가 제거된 객체로 보고 아래 수명 주기 규칙�
 이미지 객체는 immutable하게 다룬다. 이미지를 변경할 때 기존 key를
 덮어쓰지 않고 새 파일을 업로드해 새 key로 `PATCH`한다.
 
+업로드된 객체는 다음 상태를 가진다.
+
+| 상태        | 의미                                            |
+| ----------- | ----------------------------------------------- |
+| `UPLOADING` | presigned URL을 발급했고 업로드를 기다리는 상태 |
+| `UPLOADED`  | 객체 생성이 확인된 상태                         |
+| `ATTACHED`  | 기본 리소스에 연결된 상태                       |
+| `DETACHED`  | 연결이 해제되어 정리 대상이 된 상태             |
+
+연결 해제는 S3 삭제를 즉시 호출하지 않는다. 상태를 `DETACHED`로 바꾸고
+해제 시각을 기록하는 것으로 끝내며, 실제 삭제는 cleanup 작업이 맡는다.
+이 분리가 S3 삭제 실패로 DB transaction이 rollback되지 않음을 구조로
+보장한다.
+
+`DETACHED`가 된 object key는 다시 연결할 수 없다. 이미 정리 대상이므로
+재연결하면 cleanup이 삭제한 객체를 리소스가 가리킬 수 있다. 재사용이
+필요하면 새 key로 업로드한다.
+
 - 리소스에 연결되지 않은 업로드 객체는 24시간 뒤 정리한다.
 - `PATCH`로 교체되거나 기본 리소스 `DELETE`로 참조가 제거된 객체는 DB
   commit과 ISR 요청 이후 최소 24시간의 유예를 두고 비동기로 삭제한다.
@@ -1400,11 +1419,14 @@ Bearer 인증이 필요하다.
 | LOST_ITEM               | 선택 언어 분실물 필드                                     | 기본 필드와 `translations`      |
 | LOST_ITEM_TRANSLATION   | `language_code`, `title`, `description`, `found_location` | 자식 ID와 FK를 포함한 번역 배열 |
 
-이미지 업로드 자체는 ERD 리소스를 추가하지 않는다. URL 발급 API는
-presigned PUT URL과 S3 object key를 반환하고, ERD에 이미 존재하는
-`category_icon_uri`, `place_image_uri`, `image_url`, `image_uri` 필드가
-업로드 완료 후 해당 key를 저장한다. 이 네 필드는 모두 nullable이며
-이미지를 올리지 않은 행은 `null`로 남는다.
+이미지 업로드는 ERD에 `IMAGE`와 `PLACE_IMAGE` 두 엔티티를 추가한다.
+`IMAGE`는 object key와 업로드 상태를 소유하고 `s3_key`에 unique 제약을
+두어 하나의 key가 하나의 기본 리소스에만 연결되도록 강제한다.
+`CATEGORY.category_icon_uri`, `MENU.image_url`, `PERFORMANCE.image_uri`,
+`LOST_ITEM.image_url`은 `IMAGE`를 참조하는 nullable FK가 되고,
+`PLACE.place_image_uri`는 순서를 갖는 `PLACE_IMAGE` 연결 엔티티로
+대체된다. API 요청과 응답은 이 변경과 무관하게 object key 문자열을
+주고받으며 `image_id`를 노출하지 않는다.
 
 `PERFORMANCE`의 `start_at`과 `end_at`은 ERD에서 제거하고 `date`, `seq`,
 `is_live`로 대체한다. 공연 타임라인은 시각을 노출하지 않고 일차와 순서로

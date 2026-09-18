@@ -6,9 +6,18 @@ from sqlalchemy import text
 
 INSTANT = datetime(2026, 10, 6, 9, tzinfo=UTC)
 
+VALID_IMAGE = {
+    "s3_key": "images/place/first.webp",
+    "resource_type": "PLACE_IMAGE",
+    "content_type": "image/webp",
+    "declared_size": 348210,
+    "status": "UPLOADING",
+}
+
 # Insertion order follows the foreign keys. Every fresh fixture restarts identities.
 VALID_ROWS = {
-    "category": {"code": "PUB", "category_icon_uri": "images/category/icon.webp"},
+    "image": VALID_IMAGE,
+    "category": {"code": "PUB", "image_id": None},
     "category_translation": {
         "category_id": 1,
         "language_code": "KO",
@@ -21,7 +30,6 @@ VALID_ROWS = {
         "y": -7.5,
         "start_hour": INSTANT,
         "end_hour": INSTANT,
-        "place_image_uri": ["images/place/second.webp", "images/place/first.webp"],
     },
     "place_translation": {
         "place_id": 1,
@@ -30,7 +38,8 @@ VALID_ROWS = {
         "host_college": "공과대학",
         "description": "행사 안내",
     },
-    "menu": {"place_id": 1, "image_url": "images/menu/item.webp", "price": 0},
+    "place_image": {"place_id": 1, "image_id": 1, "seq": 1},
+    "menu": {"place_id": 1, "image_id": None, "price": 0},
     "menu_translation": {
         "menu_id": 1,
         "language_code": "KO",
@@ -39,7 +48,7 @@ VALID_ROWS = {
     },
     "performance": {
         "type": "ARTIST",
-        "image_uri": "images/performance/artist.webp",
+        "image_id": None,
         "start_at": INSTANT,
         "end_at": INSTANT,
     },
@@ -56,7 +65,7 @@ VALID_ROWS = {
         "title": "공지",
         "content": "공지 본문",
     },
-    "lost_item": {"image_url": "images/lost-item/bag.webp", "is_returned": False},
+    "lost_item": {"image_id": None, "is_returned": False},
     "lost_item_translation": {
         "lost_item_id": 1,
         "language_code": "KO",
@@ -70,11 +79,15 @@ TRANSLATIONS = tuple(name for name in VALID_ROWS if name.endswith("_translation"
 TABLES = tuple(VALID_ROWS)
 
 NULLABLE_IMAGE_COLUMNS = {
-    ("category", "category_icon_uri"),
-    ("place", "place_image_uri"),
-    ("menu", "image_url"),
-    ("performance", "image_uri"),
-    ("lost_item", "image_url"),
+    ("category", "image_id"),
+    ("menu", "image_id"),
+    ("performance", "image_id"),
+    ("lost_item", "image_id"),
+    # image 자체의 nullable 컬럼. VALID_IMAGE에는 없는 키라 REQUIRED_COLUMNS엔
+    # 영향이 없고, test_migrations.py의 스키마 대조가 실제 컬럼 nullable
+    # 여부를 이 집합과 비교하므로 여기 등록해야 한다.
+    ("image", "byte_size"),
+    ("image", "detached_at"),
 }
 
 DEFAULT_EMPTY_COLUMNS = {

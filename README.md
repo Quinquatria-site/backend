@@ -41,12 +41,32 @@ DB 세션을 사용합니다. 공통 패키지는 FastAPI에 의존하지 않습
 uv sync --all-packages
 ```
 
-개발 서버를 실행합니다.
+로컬 환경변수를 준비합니다. `.env`는 Git에 올라가지 않습니다.
 
 ```bash
-uv --directory apps/backoffice run fastapi dev
-uv --directory apps/customer run fastapi dev --port 8001
+cp .env.example .env
 ```
+
+개발 서버를 실행합니다. `--env-file`은 루트 기준 상대경로라 루트에서 실행합니다.
+
+```bash
+uv run --env-file .env --package backoffice \
+    fastapi dev apps/backoffice/src/backoffice/main.py
+uv run --env-file .env --package customer \
+    fastapi dev apps/customer/src/customer/main.py --port 8001
+```
+
+매번 플래그를 치지 않으려면 셸에 한 번 걸어둡니다.
+
+```bash
+export UV_ENV_FILE=.env
+```
+
+`.env`는 로컬 전용입니다. 배포 환경은 이 파일을 쓰지 않고 플랫폼이 환경변수를
+직접 주입하며, 실제 환경변수가 파일보다 우선하므로 배포 동작은 이 파일의 존재와
+무관합니다. 애플리케이션 코드는 환경변수만 읽고 `.env`를 직접 열지 않습니다 —
+파일을 읽는 주체는 `uv`이고, 그래서 같은 파일 하나가 앱·`alembic`·cleanup 작업에
+모두 적용됩니다.
 
 ## 검사
 
@@ -61,6 +81,10 @@ uv run --all-packages pytest
 uv run ruff check .
 uv run ruff format --check .
 ```
+
+테스트에는 `--env-file`을 주지 않습니다. `.env`가 테스트에 끼어들면 그 파일을
+가진 개발자 머신에서만 값이 채워져, "필수 환경변수가 없으면 기동에 실패한다"를
+검증하는 테스트가 로컬과 CI에서 다르게 동작합니다.
 
 ## 의존성 관리
 
@@ -87,10 +111,13 @@ URL은 `postgresql+psycopg` 형식을 사용하며 `postgresql`과 `postgres` �
 동일한 드라이버로 처리합니다. 접속 정보는 Git에 저장하지 않습니다.
 
 ```bash
-uv run --all-packages alembic upgrade head
-uv run --all-packages alembic current
-uv run --all-packages alembic check
+uv run --env-file .env --all-packages alembic upgrade head
+uv run --env-file .env --all-packages alembic current
+uv run --env-file .env --all-packages alembic check
 ```
+
+배포 환경에서는 `--env-file` 없이 실행합니다. 플랫폼이 주입한 `DATABASE_URL`을
+그대로 읽습니다.
 
 마이그레이션은 Customer와 Backoffice가 공유하는 DB에 배포 단계에서 한 번
 적용합니다. 앱 시작 시 `create_all`이나 자동 마이그레이션을 실행하지

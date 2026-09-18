@@ -1,11 +1,15 @@
 """라우트가 주입받는 인증 관련 의존성."""
 
+from collections.abc import AsyncIterator
 from typing import Annotated
 
 from fastapi import Depends, Request
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backoffice.auth.tokens import invalid_token_error, verify_token
 from backoffice.config import Settings, get_settings
+from backoffice.images.s3 import S3ObjectStore
+from backoffice.images.store import ObjectStore
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
@@ -23,3 +27,24 @@ def require_admin(request: Request, settings: SettingsDep) -> None:
         raise invalid_token_error()
 
     verify_token(token.strip(), signing_key=settings.jwt_signing_key.get_secret_value())
+
+
+def get_object_store(settings: SettingsDep) -> ObjectStore:
+    """운영에서는 credential을 넘기지 않는다. workload IAM role을 쓴다."""
+    return S3ObjectStore(
+        bucket=settings.s3_bucket,
+        region=settings.s3_region,
+        endpoint_url=settings.s3_endpoint_url,
+    )
+
+
+ObjectStoreDep = Annotated[ObjectStore, Depends(get_object_store)]
+
+
+async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
+    """요청 하나가 transaction 하나를 연다."""
+    async with request.app.state.database.transaction() as session:
+        yield session
+
+
+SessionDep = Annotated[AsyncSession, Depends(get_session)]

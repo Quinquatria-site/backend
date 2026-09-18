@@ -4,6 +4,9 @@ from quinquatria_persistence.base import Base
 from quinquatria_persistence.database import Database
 from quinquatria_persistence.enums import (
     CategoryCode,
+    ImageContentType,
+    ImageResourceType,
+    ImageStatus,
     LanguageCode,
     NoticeType,
     PerformanceType,
@@ -11,6 +14,7 @@ from quinquatria_persistence.enums import (
 from quinquatria_persistence.models import (
     Category,
     CategoryTranslation,
+    Image,
     LostItem,
     LostItemTranslation,
     Menu,
@@ -20,6 +24,7 @@ from quinquatria_persistence.models import (
     Performance,
     PerformanceTranslation,
     Place,
+    PlaceImage,
     PlaceTranslation,
 )
 
@@ -29,6 +34,10 @@ __all__ = [
     "CategoryCode",
     "CategoryTranslation",
     "Database",
+    "Image",
+    "ImageContentType",
+    "ImageResourceType",
+    "ImageStatus",
     "LanguageCode",
     "LostItem",
     "LostItemTranslation",
@@ -41,5 +50,6 @@ __all__ = [
     "PerformanceTranslation",
     "PerformanceType",
     "Place",
+    "PlaceImage",
     "PlaceTranslation",
 ]

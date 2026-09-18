@@ -22,12 +22,18 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy import Enum as SQLAlchemyEnum
-from sqlalchemy.dialects.postgresql import ARRAY
-from sqlalchemy.ext.mutable import MutableList
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
-from .enums import CategoryCode, LanguageCode, NoticeType, PerformanceType
+from .enums import (
+    CategoryCode,
+    ImageContentType,
+    ImageResourceType,
+    ImageStatus,
+    LanguageCode,
+    NoticeType,
+    PerformanceType,
+)
 
 _OWNED_CASCADE = "save-update, merge, delete, delete-orphan"
 _language_code_type = SQLAlchemyEnum(
@@ -40,10 +46,67 @@ _performance_type = SQLAlchemyEnum(
     PerformanceType, name="performance_type", metadata=Base.metadata
 )
 _notice_type = SQLAlchemyEnum(NoticeType, name="notice_type", metadata=Base.metadata)
+_image_resource_type = SQLAlchemyEnum(
+    ImageResourceType, name="image_resource_type", metadata=Base.metadata
+)
+_image_content_type = SQLAlchemyEnum(
+    ImageContentType,
+    name="image_content_type",
+    metadata=Base.metadata,
+    # 기본값은 멤버 이름("JPEG")을 저장한다. 명세가 다루는 값은 MIME
+    # 문자열이므로 값을 저장하도록 바꾼다.
+    values_callable=lambda enum_type: [member.value for member in enum_type],
+)
+_image_status = SQLAlchemyEnum(ImageStatus, name="image_status", metadata=Base.metadata)
 
 
 class _IdentityMixin:
     id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
+
+
+class Image(_IdentityMixin, Base):
+    """업로드된 S3 객체 하나의 수명 주기.
+
+    `s3_key` unique가 명세 §4.6의 "하나의 object key는 하나의 기본
+    리소스에서만 사용할 수 있다"를 DB 수준에서 강제한다.
+    """
+
+    __tablename__ = "image"
+    __table_args__ = (
+        CheckConstraint("id > 0", name="id_positive"),
+        CheckConstraint(
+            "declared_size BETWEEN 1 AND 10485760", name="declared_size_in_range"
+        ),
+        CheckConstraint(
+            "byte_size IS NULL OR byte_size BETWEEN 1 AND 10485760",
+            name="byte_size_in_range",
+        ),
+        # 상태와 해제 시각이 어긋나면 cleanup이 유예를 잘못 계산한다.
+        CheckConstraint(
+            "(detached_at IS NULL) = (status <> 'DETACHED')",
+            name="detached_at_matches_status",
+        ),
+        Index(None, "status", "created_at"),
+        Index(None, "status", "detached_at"),
+    )
+
+    s3_key: Mapped[str] = mapped_column(Text, unique=True)
+    resource_type: Mapped[ImageResourceType] = mapped_column(_image_resource_type)
+    content_type: Mapped[ImageContentType] = mapped_column(_image_content_type)
+    declared_size: Mapped[int] = mapped_column(Integer)
+    byte_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[ImageStatus] = mapped_column(_image_status)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        onupdate=func.current_timestamp(),
+    )
+    detached_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class Category(_IdentityMixin, Base):
@@ -54,7 +117,9 @@ class Category(_IdentityMixin, Base):
     )
 
     code: Mapped[CategoryCode] = mapped_column(_category_code_type)
-    category_icon_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_id: Mapped[int | None] = mapped_column(
+        ForeignKey("image.id"), nullable=True, unique=True
+    )
 
     translations: Mapped[list[CategoryTranslation]] = relationship(
         back_populates="category",
@@ -95,20 +160,6 @@ class Place(_IdentityMixin, Base):
         CheckConstraint("id > 0", name="id_positive"),
         CheckConstraint("category_sequence >= 1", name="category_sequence_positive"),
         CheckConstraint("end_hour >= start_hour", name="hours_ordered"),
-        CheckConstraint(
-            "place_image_uri IS NULL OR cardinality(place_image_uri) >= 1",
-            name="images_nonempty",
-        ),
-        CheckConstraint(
-            "place_image_uri IS NULL OR array_ndims(place_image_uri) = 1",
-            name="images_one_dimensional",
-        ),
-        CheckConstraint(
-            "place_image_uri IS NULL OR "
-            "CASE WHEN array_ndims(place_image_uri) = 1 "
-            "THEN array_position(place_image_uri, NULL) IS NULL ELSE false END",
-            name="images_no_nulls",
-        ),
         Index(None, "category_id", "category_sequence", "id"),
     )
 
@@ -120,9 +171,6 @@ class Place(_IdentityMixin, Base):
     y: Mapped[float] = mapped_column(Double)
     start_hour: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     end_hour: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    place_image_uri: Mapped[list[str] | None] = mapped_column(
-        MutableList.as_mutable(ARRAY(Text)), nullable=True
-    )
 
     category: Mapped[Category] = relationship(back_populates="places", lazy="raise")
     translations: Mapped[list[PlaceTranslation]] = relationship(
@@ -131,6 +179,12 @@ class Place(_IdentityMixin, Base):
         passive_deletes=True,
         lazy="raise",
         order_by=lambda: (PlaceTranslation.language_code, PlaceTranslation.id),
+    )
+    images: Mapped[list[PlaceImage]] = relationship(
+        back_populates="place",
+        cascade=_OWNED_CASCADE,
+        order_by="PlaceImage.seq",
+        lazy="raise",
     )
     menus: Mapped[list[Menu]] = relationship(
         back_populates="place",
@@ -157,6 +211,32 @@ class PlaceTranslation(_IdentityMixin, Base):
     place: Mapped[Place] = relationship(back_populates="translations", lazy="raise")
 
 
+class PlaceImage(_IdentityMixin, Base):
+    """장소와 이미지의 순서 있는 연결.
+
+    `seq` unique를 deferrable로 두는 것은 `performance(date, seq)`와 같은
+    이유다. 순서를 다시 매기는 중간 상태를 한 transaction 안에서 허용해야
+    한다.
+    """
+
+    __tablename__ = "place_image"
+    __table_args__ = (
+        CheckConstraint("id > 0", name="id_positive"),
+        CheckConstraint("seq >= 1", name="seq_positive"),
+        # 이름을 지정하지 않아야 naming convention(uq_place_image_place_id_seq)이
+        # 적용된다. "uq" convention은 %(constraint_name)s 토큰이 없어, 이름을
+        # 주면 그 값이 그대로 쓰여 마이그레이션의 제약 이름과 어긋난다.
+        UniqueConstraint("place_id", "seq", deferrable=True, initially="DEFERRED"),
+        Index(None, "place_id", "seq"),
+    )
+
+    place_id: Mapped[int] = mapped_column(ForeignKey("place.id", ondelete="CASCADE"))
+    image_id: Mapped[int] = mapped_column(ForeignKey("image.id"), unique=True)
+    seq: Mapped[int] = mapped_column(Integer)
+
+    place: Mapped[Place] = relationship(back_populates="images", lazy="raise")
+
+
 class Menu(_IdentityMixin, Base):
     __tablename__ = "menu"
     __table_args__ = (
@@ -166,7 +246,9 @@ class Menu(_IdentityMixin, Base):
     )
 
     place_id: Mapped[int] = mapped_column(ForeignKey("place.id", ondelete="CASCADE"))
-    image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_id: Mapped[int | None] = mapped_column(
+        ForeignKey("image.id"), nullable=True, unique=True
+    )
     price: Mapped[int] = mapped_column(Integer)
 
     place: Mapped[Place] = relationship(back_populates="menus", lazy="raise")
@@ -204,7 +286,9 @@ class Performance(_IdentityMixin, Base):
     )
 
     type: Mapped[PerformanceType] = mapped_column(_performance_type)
-    image_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_id: Mapped[int | None] = mapped_column(
+        ForeignKey("image.id"), nullable=True, unique=True
+    )
     start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
@@ -284,7 +368,9 @@ class LostItem(_IdentityMixin, Base):
         Index(None, "is_returned", "created_at", "id"),
     )
 
-    image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_id: Mapped[int | None] = mapped_column(
+        ForeignKey("image.id"), nullable=True, unique=True
+    )
     is_returned: Mapped[bool]
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.current_timestamp()

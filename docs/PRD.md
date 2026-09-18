@@ -140,10 +140,34 @@ erDiagram
 
   LOST_ITEM ||--o{ LOST_ITEM_TRANSLATION : translates
 
+  IMAGE |o--o| CATEGORY : icon
+  IMAGE |o--o| MENU : photo
+  IMAGE |o--o| PERFORMANCE : photo
+  IMAGE |o--o| LOST_ITEM : photo
+
+  PLACE ||--o{ PLACE_IMAGE : has
+  IMAGE ||--o| PLACE_IMAGE : referenced_by
+
+  IMAGE {
+    int id PK
+    string s3_key "S3 key, UNIQUE"
+    string resource_type "CATEGORY_ICON/PLACE_IMAGE/MENU_IMAGE/PERFORMANCE_IMAGE/LOST_ITEM_IMAGE"
+    string content_type "image/jpeg, image/png, image/webp"
+    string status "UPLOADING/UPLOADED/ATTACHED/DETACHED"
+    datetime detached_at "연결 해제 시각, cleanup 유예 기준"
+  }
+
+  PLACE_IMAGE {
+    int id PK
+    int place_id FK
+    int image_id FK "UNIQUE"
+    int seq "노출 순서"
+  }
+
   CATEGORY {
     int id PK
     string code "PUB/BOOTH/FOODTRUCK/MEDI/BRACELET"
-    string category_icon_uri
+    int image_id FK
   }
 
   CATEGORY_TRANSLATION {
@@ -161,7 +185,6 @@ erDiagram
     double y
     datetime start_hour
     datetime end_hour
-    array place_image_uri "S3 key"
   }
 
   PLACE_TRANSLATION {
@@ -176,7 +199,7 @@ erDiagram
   MENU {
     int id PK
     int place_id FK
-    string image_url "메뉴 이미지 사진"
+    int image_id FK
     int price
   }
 
@@ -191,7 +214,7 @@ erDiagram
   PERFORMANCE {
     int id PK
     string type "ARTIST/STUDENT/SPECIAL"
-    string image_uri "S3 key"
+    int image_id FK
     date date "축제 일차"
     int seq "일차 내 노출 순서"
     boolean is_live "현재 공연 중 여부"
@@ -221,7 +244,7 @@ erDiagram
 
   LOST_ITEM {
     int id PK
-    string image_url "S3 key"
+    int image_id FK
     boolean is_returned
     datetime created_at
   }

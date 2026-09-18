@@ -198,7 +198,7 @@ async def test_ranges_reject_values_beyond_the_boundary(
     )
 
 
-async def test_boundary_values_and_image_order_round_trip(database, rows):
+async def test_boundary_values_round_trip(database, rows):
     async with database.engine.connect() as connection:
         place = (
             (await connection.execute(text("SELECT * FROM place WHERE id = 1")))
@@ -209,7 +209,6 @@ async def test_boundary_values_and_image_order_round_trip(database, rows):
         assert place["start_hour"] == place["end_hour"] == INSTANT
         assert place["x"] == 12.25
         assert place["y"] == -7.5
-        assert place["place_image_uri"] == VALID_ROWS["place"]["place_image_uri"]
         assert await connection.scalar(text("SELECT price FROM menu")) == 0
         assert await connection.scalar(
             text("SELECT start_at = end_at FROM performance")
@@ -223,26 +222,6 @@ async def test_boundary_values_and_image_order_round_trip(database, rows):
         assert (
             await connection.scalar(text("SELECT is_returned FROM lost_item")) is False
         )
-
-
-@pytest.mark.parametrize(
-    "expression",
-    [
-        "ARRAY[]::text[]",
-        "ARRAY[NULL]::text[]",
-        "ARRAY['image.webp', NULL]::text[]",
-        "ARRAY[['first.webp', 'second.webp']]::text[]",
-    ],
-)
-async def test_place_images_require_nonempty_one_dimensional_nonnull_elements(
-    database, rows, expression
-):
-    await assert_rejected(
-        database,
-        f"UPDATE place SET place_image_uri = {expression} WHERE id = 1",
-        {},
-        "23514",
-    )
 
 
 @pytest.mark.parametrize(

@@ -13,15 +13,26 @@ EXPECTED_ENUMS = {
     "category_code": ["PUB", "BOOTH", "FOODTRUCK", "MEDI", "BRACELET"],
     "performance_type": ["ARTIST", "STUDENT", "SPECIAL"],
     "notice_type": ["PERMANENT", "GENERAL"],
+    "image_resource_type": [
+        "CATEGORY_ICON",
+        "PLACE_IMAGE",
+        "MENU_IMAGE",
+        "PERFORMANCE_IMAGE",
+        "LOST_ITEM_IMAGE",
+    ],
+    "image_content_type": ["image/jpeg", "image/png", "image/webp"],
+    "image_status": ["UPLOADING", "UPLOADED", "ATTACHED", "DETACHED"],
 }
 
 EXPECTED_INDEXES = {
     "category": {("code", "id")},
     "place": {("category_id", "category_sequence", "id")},
+    "place_image": {("place_id", "seq")},
     "menu": {("place_id", "id")},
     "performance": {("start_at", "id"), ("type", "start_at", "id")},
     "notice": {("created_at", "id"), ("type", "created_at", "id")},
     "lost_item": {("created_at", "id"), ("is_returned", "created_at", "id")},
+    "image": {("status", "created_at"), ("status", "detached_at")},
 }
 
 
@@ -37,6 +48,11 @@ def assert_schema(connection):
         if table in {"notice", "lost_item"}:
             expected_fields.add("created_at")
             assert columns["created_at"]["default"] is not None
+        elif table == "image":
+            # image는 삽입 시 지정하지 않는 서버 관리/파생 컬럼을 추가로 갖는다.
+            expected_fields |= {"byte_size", "created_at", "updated_at", "detached_at"}
+            assert columns["created_at"]["default"] is not None
+            assert columns["updated_at"]["default"] is not None
         assert set(columns) == expected_fields
         assert {
             (table, column["name"]) for column in columns.values() if column["nullable"]
