@@ -1,8 +1,8 @@
 # Customer API
 
 Quinquatria 고객용 FastAPI 애플리케이션입니다. 인증 없이 카테고리와 장소,
-장소에 속한 메뉴와 공연, 일반·상시 공지를 조회합니다. 계약은
-[API 명세](../../docs/API_SPEC.md) §2, §3.2, §3.3, §3.4, §3.5를 따릅니다.
+장소에 속한 메뉴와 공연, 일반·상시 공지, 분실물을 조회합니다. 계약은
+[API 명세](../../docs/API_SPEC.md) §2, §3.2, §3.3, §3.4, §3.5, §3.6을 따릅니다.
 
 ## 실행
 
@@ -38,10 +38,11 @@ DB 연결은 실제 조회 시 이루어집니다. 요청마다 독립적인 세
 | GET | `/api/v1/notices/permanent` | `language_code`, `page`, `size` |
 | GET | `/api/v1/notices/latest` | `language_code` |
 | GET | `/api/v1/notices/{notice_id}` | `language_code` |
+| GET | `/api/v1/lost-items` | `language_code`, `is_returned`, `page`, `size` |
+| GET | `/api/v1/lost-items/{lost_item_id}` | `language_code` |
 
 기존 `/api/v1/` 기본 응답도 유지합니다. 카탈로그 조회 API는 #8, 공연 조회
-API는 #6, 공지 조회 API는 #10의 구현 범위입니다. 분실물 API는 아직 제공하지
-않습니다.
+API는 #6, 공지 조회 API는 #10, 분실물 조회 API는 #13의 구현 범위입니다.
 메뉴는 장소 상세의 `menus` 배열로 반환하며 별도의 메뉴 조회 경로는 없습니다.
 
 - `language_code`는 `KO`(기본값), `EN`, `CHN`을 지원하며 대소문자를 구분합니다.
@@ -105,13 +106,28 @@ API는 #6, 공지 조회 API는 #10의 구현 범위입니다. 분실물 API는 
   없으면 `RESOURCE_NOT_FOUND`, 공지는 있지만 요청 언어 번역이 없으면
   `TRANSLATION_NOT_FOUND`입니다.
 
+### 분실물
+
+- `/lost-items`는 선택한 `language_code`의 번역이 있는 분실물만
+  `created_at DESC, id DESC`로 반환합니다. `is_returned=true` 또는
+  `is_returned=false`로 반환 여부를 선택해 조회할 수 있습니다.
+- 요청 언어 번역과 `is_returned` 필터를 모두 적용한 뒤 `total`과 페이지를
+  계산합니다. 번역이 없는 항목을 다른 언어로 대체하지 않습니다.
+- `/lost-items/{lost_item_id}`는 요청 언어의 분실물 단건을 반환합니다.
+  기본 분실물 행이 없으면 `RESOURCE_NOT_FOUND`, 분실물은 있지만 요청 언어
+  번역이 없으면 `TRANSLATION_NOT_FOUND`입니다.
+- `image_url`은 DB에 저장된 S3 object key를 그대로 반환하며 이미지가 없으면
+  `null`입니다. CloudFront URL을 조합하지 않습니다.
+- `description`과 `found_location`은 항상 문자열입니다. 저장된 값이
+  없으면 `null` 대신 빈 문자열을 반환합니다.
+
 ## 오류
 
 오류 본문은 공통 `code`, `message`, `details` 구조입니다.
 
 | HTTP | code | 조건 |
 | --- | --- | --- |
-| 404 | `RESOURCE_NOT_FOUND` | 장소·공연·공지 ID에 해당하는 기본 리소스가 없음 |
+| 404 | `RESOURCE_NOT_FOUND` | 장소·공연·공지·분실물 ID에 해당하는 기본 리소스가 없음 |
 | 404 | `TRANSLATION_NOT_FOUND` | 리소스는 있으나 요청 언어 번역이 없음 |
 | 422 | `VALIDATION_ERROR` | 잘못된 ID·언어·페이지 값 또는 허용되지 않은 query |
 | 500 | `INTERNAL_SERVER_ERROR` | 공개할 수 없는 내부 오류 |
@@ -120,6 +136,8 @@ API는 #6, 공지 조회 API는 #10의 구현 범위입니다. 분실물 API는 
 `code` 필터를 전달하면 `422`입니다. 공연 상세에 목록 query를 전달하거나
 공연 목록에 명세에 없는 query를 전달해도 `422`입니다. 최근 공지와 공지
 상세에 페이지 query를 전달하거나 공지 목록에 `type`을 전달해도 `422`입니다.
+분실물 상세에 목록 query를 전달하거나 분실물 목록에 명세에 없는 필터를
+전달해도 `422`입니다.
 
 ## 테스트
 
@@ -134,20 +152,24 @@ uv run ruff format --check .
 ```
 
 HTTP 테스트는 mock 조회 결과의 응답 변환, `total`·페이지 초과,
-장소·공연·공지/번역의 404 구분, 이미지 순서·`null`, query 허용 목록과 OpenAPI
-계약을 검증합니다. 공연 HTTP 테스트는 type·date filter, 엄격한 날짜 형식,
+장소·공연·공지·분실물/번역의 404 구분, 이미지 순서·`null`, query 허용 목록과
+OpenAPI 계약을 검증합니다. 공연 HTTP 테스트는 type·date filter, 엄격한 날짜 형식,
 저장된 `is_live`의 응답 변환을 함께 검증합니다. 공지 HTTP 테스트는
 `GENERAL`·`PERMANENT` 목록 분리, 최신 기본 공지 우선 선택과 번역 fallback
 금지, 본문과 `Content-Type`이 없는 `204 No Content` 응답을 검증합니다.
+분실물 HTTP 테스트는 mock 조회 결과의 반환 여부, nullable 이미지 key,
+`description`·`found_location`의 빈 문자열 변환을 함께 검증합니다.
 
 번역 join·필터, count, pagination과 카탈로그 정렬 기준은 SQLAlchemy
 statement를 PostgreSQL dialect로 compile한 SQL 구성으로 검사합니다. 공연은
 type·date filter와 `date ASC, seq ASC, id ASC` 정렬 구성을 같은 방식으로
-검사합니다. 공지는
-type 구분과 `created_at DESC, id DESC` 정렬, 최신 `GENERAL` 기본 행을 먼저
-고르는 query 구성을 같은 방식으로 검사합니다. SQL을 DB에서 실행하지 않으므로
-실제 `date`, `seq`, `is_live` 열의 존재, DB 제약과 런타임 query 실행은
-Customer 테스트가 검증하지 않습니다.
+검사합니다. 공지는 type 구분과 `created_at DESC, id DESC` 정렬, 최신 `GENERAL`
+기본 행을 먼저
+고르는 query 구성을 같은 방식으로 검사합니다. 분실물은
+`is_returned` 필터, 번역·필터 적용 후 count와 `created_at DESC, id DESC`
+정렬 구성을 같은 방식으로 검사합니다. SQL을 DB에서 실행하지 않으므로 실제
+`date`, `seq`, `is_live` 열의 존재, DB 제약과 런타임 query 실행은 Customer
+테스트가 검증하지 않습니다.
 
 별도 lifecycle 테스트는 startup 시점의 `DATABASE_URL` 선택, 앱별
 `Database` 생성·해제, 동시 요청의 독립 세션과 정상·오류 요청의 세션 종료를
