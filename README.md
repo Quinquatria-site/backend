@@ -16,22 +16,22 @@ packages/
 ├── persistence/
 │   ├── src/quinquatria_persistence/
 │   └── tests/
-├── common/
-│   ├── src/common/
-│   └── tests/
-├── migrations/
+└── common/
+    ├── src/common/
+    └── tests/
+migrations/
 └── versions/
 ```
 
 각 앱은 독립적인 Python 패키지와 의존성 선언을 가지며, 저장소 루트의
 `uv.lock`과 `.venv`를 공유합니다.
 두 앱은 `quinquatria-persistence` workspace 패키지의 동일한 모델과
-DB 세션을 사용합니다. 공통 패키지는 FastAPI에 의존하지 않습니다.
+DB 세션을 사용합니다. persistence 패키지는 FastAPI에 의존하지 않습니다.
 
 `common`은 배포되는 애플리케이션이 아니라 두 앱이 의존하는 라이브러리입니다.
 [API 명세](docs/API_SPEC.md) §2의 공통 규칙 - `/api/v1` 경로, enum, 공통 검증,
 페이지네이션, 오류 응답 - 을 구현하며 두 앱의 계약이 갈라지지 않게 합니다.
-자세한 내용은 [apps/common/README.md](apps/common/README.md)를 참고합니다.
+자세한 내용은 [packages/common/README.md](packages/common/README.md)를 참고합니다.
 
 ## 개발 환경
 
@@ -41,7 +41,9 @@ DB 세션을 사용합니다. 공통 패키지는 FastAPI에 의존하지 않습
 uv sync --all-packages
 ```
 
-개발 서버를 실행합니다.
+개발 서버를 실행합니다. DB 스키마 반영과 쓰기는 Backoffice가 담당합니다.
+Customer는 Backoffice가 준비한 DB의 `DATABASE_URL`을 실행 환경에 주입받아
+조회합니다.
 
 ```bash
 uv --directory apps/backoffice run fastapi dev
@@ -50,13 +52,21 @@ uv --directory apps/customer run fastapi dev --port 8001
 
 ## 검사
 
-PostgreSQL 통합 테스트는 실행 중인 Docker 호환 엔진이 필요합니다.
+Customer 테스트는 `get_session`을 mock `AsyncSession`으로 대체하므로
+Docker와 `DATABASE_URL` 없이 실행됩니다. HTTP 계약과 실제 SQLAlchemy
+statement의 PostgreSQL SQL 구성, 앱의 Database lifespan 및 요청별 세션 경계를
+검증하며 SQL을 실제 DB에서 실행하지 않습니다.
+
+`packages/persistence` 테스트는 실행 중인 Docker 호환 엔진이 필요합니다.
 macOS에서 OrbStack을 사용한다면 먼저 `orb start`를 실행합니다.
 Testcontainers가 `postgres:18` 이미지로 임시 컨테이너를 만들고 종료 후
-제거합니다. 최초 실행에는 이미지 다운로드가 필요합니다. 테스트는 외부
-`DATABASE_URL`을 사용하지 않으며 Docker가 없으면 실패합니다.
+제거합니다. 최초 실행에는 이미지 다운로드가 필요합니다. persistence 테스트는
+외부 `DATABASE_URL`을 사용하지 않으며 Docker가 없으면 실패합니다. 전체
+테스트에는 persistence 테스트가 포함되므로 Docker가 필요합니다.
 
 ```bash
+uv run --all-packages pytest apps/customer/tests
+uv run --all-packages pytest packages/persistence/tests
 uv run --all-packages pytest
 uv run ruff check .
 uv run ruff format --check .
@@ -105,10 +115,19 @@ uv run --all-packages alembic check
 
 ## 공통 세션과 트랜잭션
 
-`Database(url)`은 앱별 엔진과 연결 풀을 소유합니다. 후속 API 구현에서 앱
+`Database(url)`은 앱별 엔진과 연결 풀을 소유합니다. Customer는 lifespan
 시작 시 생성하고 종료 시 `await database.dispose()`를 호출합니다.
-현재 기본 라우트는 DB 설정 없이 동작하며, 패키지 import도 접속을 만들지
-않습니다.
+`create_app(database_url=...)`로 주입한 값을 우선하며, 생략하면 시작 시
+`DATABASE_URL`을 읽습니다. 값이 없거나 비어 있으면 시작에 실패합니다.
+모듈 import와 앱 팩토리 호출은 설정을 읽거나 DB를 생성하지 않습니다.
+DB 연결은 실제 조회 시 이루어지며 시작 시 마이그레이션을 실행하지 않습니다.
+Customer는 `database.session()`으로 조회만 수행합니다. 스키마 반영과
+`database.transaction()`을 사용하는 쓰기 작업은 Backoffice가 담당합니다.
+
+Customer의 카테고리·장소·메뉴 조회 경로와 다국어 규칙은
+[Customer README](apps/customer/README.md)에 정리되어 있습니다.
+
+Backoffice 쓰기 작업은 다음처럼 하나의 transaction에 관련 변경을 묶습니다.
 
 ```python
 from quinquatria_persistence import (
