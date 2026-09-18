@@ -125,7 +125,7 @@ DB 연결은 실제 조회 시 이루어지며 시작 시 마이그레이션을 
 Customer는 `database.session()`으로 조회만 수행합니다. 스키마 반영과
 `database.transaction()`을 사용하는 쓰기 작업은 Backoffice가 담당합니다.
 
-Customer의 카테고리·장소·메뉴·공연 조회 경로와 다국어 규칙은
+Customer의 카테고리·장소·메뉴·공연·공지 조회 경로와 다국어 규칙은
 [Customer README](apps/customer/README.md)에 정리되어 있습니다.
 
 Backoffice 쓰기 작업은 다음처럼 하나의 transaction에 관련 변경을 묶습니다.
