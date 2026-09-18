@@ -1,7 +1,12 @@
 """명세 §4.1의 토큰 발급 엔드포인트를 HTTP 수준에서 검증한다."""
 
-from fastapi.testclient import TestClient
+import logging
 
+import pytest
+from fastapi.testclient import TestClient
+from pydantic import ValidationError
+
+from backoffice.api.routes.auth import TokenRequest
 from backoffice.auth.tokens import SUBJECT, verify_token
 from common.errors import ErrorCode
 
@@ -44,6 +49,39 @@ def test_response_never_echoes_the_issuance_code(client: TestClient) -> None:
 
     assert ISSUANCE_CODE not in response.text
     assert "wrong-code" not in response.text
+
+
+@pytest.mark.parametrize(
+    "mistyped",
+    [1234567890, ["secret-in-a-list"], {"secret": "in-a-dict"}],
+)
+def test_mistyped_issuance_code_does_not_reach_the_pydantic_validation_error(
+    mistyped: object,
+) -> None:
+    """직접 생성한 경우만 덮는다. HTTP 요청 경로는 아래 테스트가 맡는다."""
+    with pytest.raises(ValidationError) as raised:
+        TokenRequest(issuance_code=mistyped)
+
+    rendered = str(raised.value) + repr(raised.value)
+    assert "input_value" not in rendered
+    for fragment in ("1234567890", "secret-in-a-list", "in-a-dict"):
+        assert fragment not in rendered
+
+
+@pytest.mark.parametrize(
+    "mistyped",
+    [1234567890, ["secret-in-a-list"], {"secret": "in-a-dict"}],
+)
+def test_mistyped_issuance_code_is_not_echoed_to_the_response_or_the_log(
+    client: TestClient, caplog: pytest.LogCaptureFixture, mistyped: object
+) -> None:
+    with caplog.at_level(logging.DEBUG):
+        response = client.post(PATH, json={"issuance_code": mistyped})
+
+    assert response.status_code == 422
+    for fragment in ("1234567890", "secret-in-a-list", "in-a-dict"):
+        assert fragment not in response.text
+        assert fragment not in caplog.text
 
 
 def test_missing_body_field_is_a_validation_error(client: TestClient) -> None:

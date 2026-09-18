@@ -24,8 +24,12 @@ def settings() -> Settings:
     return Settings(
         issuance_code=SecretStr(ISSUANCE_CODE),
         jwt_signing_key=SecretStr(SIGNING_KEY),
+<<<<<<< HEAD
         # `database_url`은 Customer와 공유하는 이름이라 alias로만 받는다.
         DATABASE_URL="postgresql+psycopg://unused-in-contract-tests/quinquatria",
+=======
+        database_url="postgresql+psycopg://unused-in-contract-tests/quinquatria",
+>>>>>>> b6d87efd8ca25d827a2d005f9f426d401bb4dc32
         s3_bucket="test-bucket",
         s3_region="ap-northeast-2",
     )

@@ -398,6 +398,7 @@ dependencies = [
     { name = "common" },
     { name = "fastapi", extra = ["standard"] },
     { name = "quinquatria-persistence" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
 ]
 
 [package.metadata]
@@ -405,6 +406,7 @@ requires-dist = [
     { name = "common", editable = "packages/common" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.141.1" },
     { name = "quinquatria-persistence", editable = "packages/persistence" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.44,<2.1" },
 ]
 
 [[package]]

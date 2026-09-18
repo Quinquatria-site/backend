@@ -1,5 +1,6 @@
 """API 명세 §2의 공통 규칙을 HTTP 수준에서 검증한다."""
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated
@@ -124,6 +125,22 @@ def test_endpoint_without_query_rejects_any_parameter() -> None:
 
     assert response.status_code == 422
     assert response.json()["code"] == ErrorCode.VALIDATION_ERROR
+
+
+def test_rejected_body_value_is_not_echoed_back(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """본문에 비밀값을 싣는 엔드포인트가 있다(토큰 발급의 발급 코드)."""
+    secret = "s3cr3t-value-from-the-request-body"
+
+    with caplog.at_level(logging.DEBUG):
+        response = client.post("/api/v1/notices", json={"type": secret, "title": "t"})
+
+    assert response.status_code == 422
+    assert response.json()["code"] == ErrorCode.VALIDATION_ERROR
+    assert response.json()["details"][0]["field"] == "type"
+    assert secret not in response.text
+    assert secret not in caplog.text
 
 
 @pytest.mark.parametrize("params", [{"page": 0}, {"size": 0}, {"size": 101}])

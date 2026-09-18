@@ -23,6 +23,13 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         await application.state.database.dispose()
 
 
+@asynccontextmanager
+async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+    """설정을 기동 시점에 읽어 잘못된 인스턴스가 헬스체크를 통과하지 못하게 한다."""
+    get_settings()
+    yield
+
+
 def create_app() -> FastAPI:
     return create_api_app(
         title="Quinquatria Backoffice API", router=api_router, lifespan=lifespan
