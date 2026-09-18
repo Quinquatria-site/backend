@@ -25,6 +25,10 @@ members = ["apps/*", "packages/*"]
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib", "-q"]
+# 두 앱의 테스트 디렉터리가 모두 `tests` 패키지라, 이 옵션이 없으면 pytest가
+# 양쪽 conftest를 같은 `tests.conftest`로 등록하고 충돌로 수집이 멈춘다.
+consider_namespace_packages = true
+pythonpath = ["."]
 testpaths = [
     "apps/backoffice/tests",
     "apps/customer/tests",
