@@ -12,7 +12,7 @@ from common.types import ResourceId
 from customer.api.dependencies import ReadSession
 from customer.api.queries import is_storable_id, paginate
 from customer.api.schemas.lost_items import LostItemListQuery, LostItemResponse
-from quinquatria_persistence import LostItem, LostItemTranslation
+from quinquatria_persistence import Image, LostItem, LostItemTranslation
 
 router = APIRouter(
     tags=["lost-items"],
@@ -21,15 +21,19 @@ router = APIRouter(
 
 
 def _select_lost_items() -> Select:
-    return select(
-        LostItem.id,
-        LostItem.image_url,
-        LostItem.is_returned,
-        LostItem.created_at,
-        LostItemTranslation.language_code,
-        LostItemTranslation.title,
-        LostItemTranslation.description,
-        LostItemTranslation.found_location,
+    return (
+        select(
+            LostItem.id,
+            Image.s3_key.label("image_url"),
+            LostItem.is_returned,
+            LostItem.created_at,
+            LostItemTranslation.language_code,
+            LostItemTranslation.title,
+            LostItemTranslation.description,
+            LostItemTranslation.found_location,
+        )
+        .select_from(LostItem)
+        .outerjoin(Image, Image.id == LostItem.image_id)
     )
 
 

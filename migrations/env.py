@@ -2,6 +2,9 @@
 
 import asyncio
 import os
+import selectors
+import sys
+from collections.abc import Callable
 from logging.config import fileConfig
 
 from alembic import context
@@ -53,6 +56,21 @@ def run_migrations(connection: Connection) -> None:
         context.run_migrations()
 
 
+def _loop_factory() -> Callable[[], asyncio.AbstractEventLoop] | None:
+    """Windows에서만 psycopg async 호환 루프 팩토리를 돌려준다.
+
+    psycopg는 async 모드에서 Windows 기본 루프인 ProactorEventLoop 위를 돌 수
+    없다. `alembic upgrade`는 pytest를 거치지 않고 이 파일을 직접 실행하므로
+    (`conftest.py`의 pytest-asyncio 훅이 닿지 않는 경로다) 여기서도 같은 판단을
+    따로 해줘야 한다. `WindowsSelectorEventLoopPolicy`는 Python 3.16에서 제거될
+    예정이라 쓰지 않고, 루프를 직접 만들어 넘긴다. 다른 플랫폼은 None을 반환해
+    `asyncio.run`의 기본 동작을 그대로 둔다.
+    """
+    if sys.platform != "win32":
+        return None
+    return lambda: asyncio.SelectorEventLoop(selectors.SelectSelector())
+
+
 async def run_async_migrations() -> None:
     engine = create_async_engine(
         database_url(), poolclass=pool.NullPool, hide_parameters=True
@@ -70,4 +88,4 @@ elif (connection := config.attributes.get("connection")) is not None:
     # Async callers supply this connection inside AsyncConnection.run_sync().
     run_migrations(connection)
 else:
-    asyncio.run(run_async_migrations())
+    asyncio.run(run_async_migrations(), loop_factory=_loop_factory())

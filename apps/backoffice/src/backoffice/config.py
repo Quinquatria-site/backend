@@ -20,11 +20,18 @@ MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
 
 class Settings(BaseSettings):
-    """환경변수 `BACKOFFICE_*`에서 읽는 실행 설정."""
+    """환경변수 `BACKOFFICE_*`에서 읽는 실행 설정.
+
+    예외는 `database_url` 하나다. 아래 필드 주석을 참고한다.
+    """
 
     # 정적 AWS access key를 받지 않는다. 서명은 workload IAM role의 임시
     # credential로 하며, 키를 설정에 두면 유출 시 만료가 없다.
-
+    #
+    # `populate_by_name`을 켜지 않는다. 켜면 alias를 쓰는 필드가 prefix 붙은
+    # 이름으로도 들어와, 없애려던 `BACKOFFICE_DATABASE_URL`이 조용한 fallback으로
+    # 되살아난다.
+    #
     # 검증 오류는 `SecretStr`로 감싸기 전의 원본 입력을 싣고, `missing` 오류는
     # 설정 전체 dict를 싣는다. 설정은 지연 로드되므로 예외 로그로 흘러나간다.
     model_config = SettingsConfigDict(
@@ -33,14 +40,22 @@ class Settings(BaseSettings):
 
     issuance_code: SecretStr
     jwt_signing_key: SecretStr
-    database_url: str
+    database_url: str = Field(validation_alias="DATABASE_URL")
+    """Customer와 공유하는 DB. 앱 prefix를 붙이지 않는 유일한 설정이다.
+
+    두 앱이 같은 DB를 쓰므로 앱마다 다른 이름을 두면 같은 값을 두 번 주입해야
+    하고, 한쪽만 바꿨을 때 앱과 마이그레이션이 서로 다른 DB를 가리키게 된다.
+    `migrations/env.py`도 같은 `DATABASE_URL`을 읽는다.
+    """
+
     s3_bucket: str
     s3_region: str
 
     s3_endpoint_url: str | None = None
     token_ttl_seconds: int = Field(18000, ge=1)
     presigned_url_ttl_seconds: int = Field(300, ge=1)
-    max_image_bytes: int = Field(MAX_IMAGE_BYTES, ge=1)
+    max_image_bytes: int = Field(MAX_IMAGE_BYTES, ge=1, le=MAX_IMAGE_BYTES)
+    """낮추는 것만 허용한다. 원장 CHECK가 10 MiB로 고정돼 있다."""
     cleanup_grace_seconds: int = Field(86400, ge=0)
     cleanup_batch_size: int = Field(500, ge=1)
 

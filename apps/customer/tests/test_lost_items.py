@@ -100,6 +100,8 @@ def test_list_defaults_to_korean_and_serializes_nullable_and_empty_fields(
     _assert_unpaginated_count(count_sql)
     assert "ORDER BY lost_item.created_at DESC, lost_item.id DESC" in page_sql
     assert "LIMIT 20 OFFSET 0" in page_sql
+    assert "image.s3_key AS image_url" in page_sql
+    assert "LEFT OUTER JOIN image ON image.id = lost_item.image_id" in page_sql
 
 
 @pytest.mark.parametrize(

@@ -29,7 +29,8 @@ SHORT_LEAKY_KEY = LEAKY_KEY_MARK.ljust(MIN_SIGNING_KEY_BYTES - 1, "0")
 REQUIRED_SETTINGS = (
     "BACKOFFICE_ISSUANCE_CODE",
     "BACKOFFICE_JWT_SIGNING_KEY",
-    "BACKOFFICE_DATABASE_URL",
+    # DB는 Customer와 공유하므로 앱 prefix를 붙이지 않는다.
+    "DATABASE_URL",
     "BACKOFFICE_S3_BUCKET",
     "BACKOFFICE_S3_REGION",
 )
@@ -51,12 +52,14 @@ def _fresh_settings() -> Iterator[None]:
         get_settings.cache_clear()
 
 
+DATABASE_URL = "postgresql+psycopg://user:pw@localhost/quinquatria"
+
+
 def _set_required(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BACKOFFICE_ISSUANCE_CODE", VALID_CODE)
     monkeypatch.setenv("BACKOFFICE_JWT_SIGNING_KEY", VALID_KEY)
-    monkeypatch.setenv(
-        "BACKOFFICE_DATABASE_URL", "postgresql+psycopg://user:pw@localhost/quinquatria"
-    )
+    # DB는 Customer와 공유하므로 앱 prefix를 붙이지 않는다.
+    monkeypatch.setenv("DATABASE_URL", DATABASE_URL)
     monkeypatch.setenv("BACKOFFICE_S3_BUCKET", "quinquatria-assets")
     monkeypatch.setenv("BACKOFFICE_S3_REGION", "ap-northeast-2")
 
@@ -334,8 +337,50 @@ def test_max_image_bytes_is_ten_mebibytes() -> None:
     assert MAX_IMAGE_BYTES == 10 * 1024 * 1024
 
 
+def test_max_image_bytes_can_be_lowered(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_required(monkeypatch)
+    monkeypatch.setenv("BACKOFFICE_MAX_IMAGE_BYTES", "1048576")
+
+    assert Settings().max_image_bytes == 1048576
+
+
+def test_max_image_bytes_cannot_exceed_the_ledger_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """설정만 더 크면 flush에서 CHECK가 터져 413/422가 내부 오류가 된다."""
+    _set_required(monkeypatch)
+    monkeypatch.setenv("BACKOFFICE_MAX_IMAGE_BYTES", str(MAX_IMAGE_BYTES + 1))
+
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+def test_database_url_is_read_without_the_app_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DB는 Customer와 공유하므로 앱마다 다른 이름을 갖지 않는다.
+
+    `migrations/env.py`도 같은 `DATABASE_URL`을 읽는다. 이름이 갈리면 앱과
+    마이그레이션이 서로 다른 DB를 가리켜도 아무도 알아채지 못한다.
+    """
+    _set_required(monkeypatch)
+
+    assert Settings().database_url == DATABASE_URL
+
+
+def test_prefixed_database_url_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`BACKOFFICE_DATABASE_URL`은 더 이상 설정 입구가 아니다."""
+    _set_required(monkeypatch)
+    monkeypatch.delenv("DATABASE_URL")
+    monkeypatch.setenv("BACKOFFICE_DATABASE_URL", DATABASE_URL)
+
+    with pytest.raises(ValidationError):
+        Settings()
+
+
 def test_static_aws_credentials_are_not_configurable() -> None:
     """workload IAM role만 쓰므로 정적 키를 받는 입구를 두지 않는다."""
+    # 인스턴스의 `model_fields` 접근은 Pydantic V3에서 제거되므로 클래스에서 읽는다.
     fields = set(Settings.model_fields)
 
     assert not {name for name in fields if "access_key" in name or "secret" in name}
