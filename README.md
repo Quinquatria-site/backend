@@ -16,22 +16,23 @@ packages/
 ├── persistence/
 │   ├── src/quinquatria_persistence/
 │   └── tests/
-├── common/
-│   ├── src/common/
-│   └── tests/
-├── migrations/
+└── common/
+    ├── src/common/
+    └── tests/
+migrations/
 └── versions/
 ```
 
 각 앱은 독립적인 Python 패키지와 의존성 선언을 가지며, 저장소 루트의
 `uv.lock`과 `.venv`를 공유합니다.
-두 앱은 `quinquatria-persistence` workspace 패키지의 동일한 모델과
-DB 세션을 사용합니다. 공통 패키지는 FastAPI에 의존하지 않습니다.
+두 앱은 `quinquatria-persistence` workspace 패키지의 모델과 DB 세션을
+공유합니다. Customer 공연 조회는 Backoffice가 준비한 Core 읽기 열을
+사용합니다. persistence 패키지는 FastAPI에 의존하지 않습니다.
 
 `common`은 배포되는 애플리케이션이 아니라 두 앱이 의존하는 라이브러리입니다.
 [API 명세](docs/API_SPEC.md) §2의 공통 규칙 - `/api/v1` 경로, enum, 공통 검증,
 페이지네이션, 오류 응답 - 을 구현하며 두 앱의 계약이 갈라지지 않게 합니다.
-자세한 내용은 [apps/common/README.md](apps/common/README.md)를 참고합니다.
+자세한 내용은 [packages/common/README.md](packages/common/README.md)를 참고합니다.
 
 ## 개발 환경
 
@@ -41,26 +42,60 @@ DB 세션을 사용합니다. 공통 패키지는 FastAPI에 의존하지 않습
 uv sync --all-packages
 ```
 
-개발 서버를 실행합니다.
+개발 서버를 실행합니다. DB 스키마 반영과 쓰기는 Backoffice가 담당합니다.
+Customer는 Backoffice가 준비한 DB의 `DATABASE_URL`을 실행 환경에 주입받아
+조회합니다.
 
 ```bash
-uv --directory apps/backoffice run fastapi dev
-uv --directory apps/customer run fastapi dev --port 8001
+cp .env.example .env
 ```
+
+개발 서버를 실행합니다. `--env-file`은 루트 기준 상대경로라 루트에서 실행합니다.
+
+```bash
+uv run --env-file .env --package backoffice \
+    fastapi dev apps/backoffice/src/backoffice/main.py
+uv run --env-file .env --package customer \
+    fastapi dev apps/customer/src/customer/main.py --port 8001
+```
+
+매번 플래그를 치지 않으려면 셸에 한 번 걸어둡니다.
+
+```bash
+export UV_ENV_FILE=.env
+```
+
+`.env`는 로컬 전용입니다. 배포 환경은 이 파일을 쓰지 않고 플랫폼이 환경변수를
+직접 주입하며, 실제 환경변수가 파일보다 우선하므로 배포 동작은 이 파일의 존재와
+무관합니다. 애플리케이션 코드는 환경변수만 읽고 `.env`를 직접 열지 않습니다 —
+파일을 읽는 주체는 `uv`이고, 그래서 같은 파일 하나가 앱·`alembic`·cleanup 작업에
+모두 적용됩니다.
 
 ## 검사
 
-PostgreSQL 통합 테스트는 실행 중인 Docker 호환 엔진이 필요합니다.
+Customer 테스트는 `get_session`을 mock `AsyncSession`으로 대체하므로
+Docker와 `DATABASE_URL` 없이 실행됩니다. HTTP 계약과 실제 SQLAlchemy
+statement의 PostgreSQL SQL 구성, 앱의 Database lifespan 및 요청별 세션 경계를
+검증하며 SQL을 실제 DB에서 실행하지 않습니다.
+
+`packages/persistence` 테스트는 실행 중인 Docker 호환 엔진이 필요합니다.
 macOS에서 OrbStack을 사용한다면 먼저 `orb start`를 실행합니다.
 Testcontainers가 `postgres:18` 이미지로 임시 컨테이너를 만들고 종료 후
-제거합니다. 최초 실행에는 이미지 다운로드가 필요합니다. 테스트는 외부
-`DATABASE_URL`을 사용하지 않으며 Docker가 없으면 실패합니다.
+제거합니다. 최초 실행에는 이미지 다운로드가 필요합니다. persistence 테스트는
+외부 `DATABASE_URL`을 사용하지 않으며 Docker가 없으면 실패합니다. 전체
+테스트에는 persistence 테스트가 포함되므로 Docker가 필요합니다.
 
 ```bash
+uv run --all-packages pytest apps/customer/tests
+uv run --all-packages pytest packages/persistence/tests
 uv run --all-packages pytest
 uv run ruff check .
 uv run ruff format --check .
 ```
+
+테스트에는 `--env-file`을 주지 않습니다. `.env`가 테스트에 끼어들면 그 파일을
+가진 개발자 머신에서만 값이 채워져, "필수 환경변수가 없으면 기동에 실패한다"를
+검증하는 테스트가 로컬과 CI에서 다르게 동작합니다.
 
 ## 의존성 관리
 
@@ -87,10 +122,13 @@ URL은 `postgresql+psycopg` 형식을 사용하며 `postgresql`과 `postgres` �
 동일한 드라이버로 처리합니다. 접속 정보는 Git에 저장하지 않습니다.
 
 ```bash
-uv run --all-packages alembic upgrade head
-uv run --all-packages alembic current
-uv run --all-packages alembic check
+uv run --env-file .env --all-packages alembic upgrade head
+uv run --env-file .env --all-packages alembic current
+uv run --env-file .env --all-packages alembic check
 ```
+
+배포 환경에서는 `--env-file` 없이 실행합니다. 플랫폼이 주입한 `DATABASE_URL`을
+그대로 읽습니다.
 
 마이그레이션은 Customer와 Backoffice가 공유하는 DB에 배포 단계에서 한 번
 적용합니다. 앱 시작 시 `create_all`이나 자동 마이그레이션을 실행하지
@@ -98,17 +136,26 @@ uv run --all-packages alembic check
 `alembic downgrade base`는 이 테이블의 데이터까지 제거하므로 임시 DB에서
 마이그레이션 왕복 검증을 할 때만 사용합니다.
 
-스키마를 변경할 때는 모델과 함께 새 Alembic revision을 추가합니다.
-기존 revision은 당시의 스키마를 보존하며 현재 모델에서 DDL을 재생성하지
-않습니다. 통합 테스트는 `upgrade`, 재실행, `downgrade` 후 재적용과
-모델 메타데이터의 일치를 검사합니다.
+스키마를 변경할 때는 Backoffice 모델과 함께 새 Alembic revision을 추가하며,
+이미 배포된 revision은 보존합니다. Customer 공연 조회는 Backoffice가
+`date`, `seq`, `is_live` 열을 실제 DB에 반영한 뒤에만 동작합니다. Customer는
+이 스키마를 생성·변환하거나 데이터를 backfill하지 않습니다.
 
 ## 공통 세션과 트랜잭션
 
-`Database(url)`은 앱별 엔진과 연결 풀을 소유합니다. 후속 API 구현에서 앱
+`Database(url)`은 앱별 엔진과 연결 풀을 소유합니다. Customer는 lifespan
 시작 시 생성하고 종료 시 `await database.dispose()`를 호출합니다.
-현재 기본 라우트는 DB 설정 없이 동작하며, 패키지 import도 접속을 만들지
-않습니다.
+`create_app(database_url=...)`로 주입한 값을 우선하며, 생략하면 시작 시
+`DATABASE_URL`을 읽습니다. 값이 없거나 비어 있으면 시작에 실패합니다.
+모듈 import와 앱 팩토리 호출은 설정을 읽거나 DB를 생성하지 않습니다.
+DB 연결은 실제 조회 시 이루어지며 시작 시 마이그레이션을 실행하지 않습니다.
+Customer는 `database.session()`으로 조회만 수행합니다. 스키마 반영과
+`database.transaction()`을 사용하는 쓰기 작업은 Backoffice가 담당합니다.
+
+Customer의 카테고리·장소·메뉴·공연·공지·분실물 조회 경로와 다국어 규칙은
+[Customer README](apps/customer/README.md)에 정리되어 있습니다.
+
+Backoffice 쓰기 작업은 다음처럼 하나의 transaction에 관련 변경을 묶습니다.
 
 ```python
 from quinquatria_persistence import (

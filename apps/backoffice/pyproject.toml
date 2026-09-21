@@ -8,8 +8,11 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
+    "aioboto3>=15.5,<16",
     "common",
     "fastapi[standard]>=0.141.1",
+    "pydantic-settings>=2.7,<3",
+    "pyjwt>=2.10,<3",
     "quinquatria-persistence",
 ]
 
