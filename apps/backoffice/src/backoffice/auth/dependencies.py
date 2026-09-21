@@ -47,4 +47,7 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
         yield session
 
 
-SessionDep = Annotated[AsyncSession, Depends(get_session)]
+# `function` scope로 라우트 반환 직후 transaction을 끝낸다. 기본 `request`
+# scope는 응답 뒤에 commit하므로, commit이 실패해도 client는 이미 쓸 수 없는
+# upload URL을 200으로 받은 뒤다.
+SessionDep = Annotated[AsyncSession, Depends(get_session, scope="function")]
