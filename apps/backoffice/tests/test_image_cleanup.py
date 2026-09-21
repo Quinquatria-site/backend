@@ -54,10 +54,7 @@ async def test_stale_uploading_row_is_cleaned(database, store) -> None:
     put_object(store, "images/place/a.webp", body=b"x", content_type="image/webp")
     await _seed(database, [_image("images/place/a.webp", ImageStatus.UPLOADING)], OLD)
 
-    async with database.transaction() as session:
-        report = await sweep(
-            session, store, now=NOW, grace_seconds=GRACE, batch_size=100
-        )
+    report = await sweep(database, store, now=NOW, grace_seconds=GRACE, batch_size=100)
 
     assert report.deleted == 1
     assert store.deleted == ["images/place/a.webp"]
@@ -70,10 +67,7 @@ async def test_recent_uploading_row_is_kept(database, store) -> None:
         database, [_image("images/place/a.webp", ImageStatus.UPLOADING)], RECENT
     )
 
-    async with database.transaction() as session:
-        report = await sweep(
-            session, store, now=NOW, grace_seconds=GRACE, batch_size=100
-        )
+    report = await sweep(database, store, now=NOW, grace_seconds=GRACE, batch_size=100)
 
     assert report.deleted == 0
     assert store.deleted == []
@@ -88,10 +82,7 @@ async def test_attached_row_is_never_a_candidate(database, store) -> None:
         NOW - timedelta(days=90),
     )
 
-    async with database.transaction() as session:
-        report = await sweep(
-            session, store, now=NOW, grace_seconds=GRACE, batch_size=100
-        )
+    report = await sweep(database, store, now=NOW, grace_seconds=GRACE, batch_size=100)
 
     assert report.deleted == 0
     assert store.deleted == []
@@ -112,10 +103,7 @@ async def test_detached_row_waits_for_its_own_grace(database, store) -> None:
         NOW - timedelta(days=90),
     )
 
-    async with database.transaction() as session:
-        report = await sweep(
-            session, store, now=NOW, grace_seconds=GRACE, batch_size=100
-        )
+    report = await sweep(database, store, now=NOW, grace_seconds=GRACE, batch_size=100)
 
     assert report.deleted == 0
 
@@ -128,24 +116,29 @@ async def test_detached_row_past_its_grace_is_cleaned(database, store) -> None:
         NOW - timedelta(days=90),
     )
 
-    async with database.transaction() as session:
-        report = await sweep(
-            session, store, now=NOW, grace_seconds=GRACE, batch_size=100
-        )
+    report = await sweep(database, store, now=NOW, grace_seconds=GRACE, batch_size=100)
 
     assert report.deleted == 1
 
 
-async def test_failed_deletion_keeps_the_row(database, store) -> None:
-    """다음 실행에서 재시도해야 하므로 행을 지우지 않는다."""
-    put_object(store, "images/place/a.webp", body=b"x", content_type="image/webp")
+async def test_failed_deletion_still_releases_the_row(database, store) -> None:
+    """삭제 권한은 DB에서 먼저 얻으므로 행은 이미 없다.
+
+    남은 객체는 행이 없는 객체가 되어 `_sweep_untracked`의 담당으로
+    넘어간다. 행을 남겨 두면 그 행이 가리키는 파일이 정말 있는지 아무도
+    보장하지 못한다.
+    """
+    put_object(
+        store,
+        "images/place/a.webp",
+        body=b"x",
+        content_type="image/webp",
+        last_modified=OLD,
+    )
     store.delete_failures.add("images/place/a.webp")
     await _seed(database, [_image("images/place/a.webp", ImageStatus.UPLOADING)], OLD)
 
-    async with database.transaction() as session:
-        report = await sweep(
-            session, store, now=NOW, grace_seconds=GRACE, batch_size=100
-        )
+    report = await sweep(database, store, now=NOW, grace_seconds=GRACE, batch_size=100)
 
     assert report.failed == 1
     assert report.deleted == 0
@@ -153,25 +146,30 @@ async def test_failed_deletion_keeps_the_row(database, store) -> None:
     async with database.session() as session:
         remaining = (await session.execute(select(Image))).scalars().all()
 
-    assert len(remaining) == 1
+    assert remaining == []
+    assert "images/place/a.webp" in store.objects
 
 
-async def test_rerunning_after_a_failure_retries(database, store) -> None:
-    put_object(store, "images/place/a.webp", body=b"x", content_type="image/webp")
+async def test_rerunning_after_a_failure_reclaims_the_object(database, store) -> None:
+    """첫 실행이 행을 지웠으므로 두 번째 실행은 고아 객체로 회수한다."""
+    put_object(
+        store,
+        "images/place/a.webp",
+        body=b"x",
+        content_type="image/webp",
+        last_modified=OLD,
+    )
     store.delete_failures.add("images/place/a.webp")
     await _seed(database, [_image("images/place/a.webp", ImageStatus.UPLOADING)], OLD)
 
-    async with database.transaction() as session:
-        await sweep(session, store, now=NOW, grace_seconds=GRACE, batch_size=100)
+    await sweep(database, store, now=NOW, grace_seconds=GRACE, batch_size=100)
 
     store.delete_failures.clear()
 
-    async with database.transaction() as session:
-        report = await sweep(
-            session, store, now=NOW, grace_seconds=GRACE, batch_size=100
-        )
+    report = await sweep(database, store, now=NOW, grace_seconds=GRACE, batch_size=100)
 
-    assert report.deleted == 1
+    assert report.orphans == 1
+    assert store.deleted == ["images/place/a.webp"]
 
 
 async def test_object_without_a_row_is_swept_as_an_orphan(database, store) -> None:
@@ -184,10 +182,7 @@ async def test_object_without_a_row_is_swept_as_an_orphan(database, store) -> No
         last_modified=OLD,
     )
 
-    async with database.transaction() as session:
-        report = await sweep(
-            session, store, now=NOW, grace_seconds=GRACE, batch_size=100
-        )
+    report = await sweep(database, store, now=NOW, grace_seconds=GRACE, batch_size=100)
 
     assert report.orphans == 1
     assert store.deleted == ["images/place/ghost.webp"]
@@ -202,10 +197,7 @@ async def test_recent_object_without_a_row_is_kept(database, store) -> None:
         last_modified=RECENT,
     )
 
-    async with database.transaction() as session:
-        report = await sweep(
-            session, store, now=NOW, grace_seconds=GRACE, batch_size=100
-        )
+    report = await sweep(database, store, now=NOW, grace_seconds=GRACE, batch_size=100)
 
     assert report.orphans == 0
     assert store.deleted == []
@@ -219,7 +211,6 @@ async def test_batch_size_caps_one_run(database, store) -> None:
         images.append(_image(key, ImageStatus.UPLOADING))
     await _seed(database, images, OLD)
 
-    async with database.transaction() as session:
-        report = await sweep(session, store, now=NOW, grace_seconds=GRACE, batch_size=2)
+    report = await sweep(database, store, now=NOW, grace_seconds=GRACE, batch_size=2)
 
     assert report.deleted == 2

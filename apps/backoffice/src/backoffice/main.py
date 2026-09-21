@@ -5,6 +5,7 @@ from fastapi import FastAPI
 
 from backoffice.api.router import api_router
 from backoffice.config import get_settings
+from backoffice.images.masking import suppress_sdk_signature_logs
 from common.app import create_api_app
 from quinquatria_persistence import Database
 
@@ -25,6 +26,8 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
+    # 설정을 읽기 전에 건다. 기동 중 실패해도 서명이 남을 창이 없어야 한다.
+    suppress_sdk_signature_logs()
     return create_api_app(
         title="Quinquatria Backoffice API", router=api_router, lifespan=lifespan
     )

@@ -1,11 +1,18 @@
-"""로그에 남기기 전에 presigned URL에서 권한 부분을 지운다.
+"""배포 계약 §8 - 서명을 응답 본문 밖에 남기지 않기 위한 로그 위생."""
 
-파라미터를 골라 지우지 않고 query string 전체를 버린다. 고르는 방식은 새
-서명 파라미터가 생기면 조용히 새기 시작한다.
-"""
+import logging
+
+_SIGNATURE_LOGGERS = ("botocore.auth",)
+"""DEBUG에서 `X-Amz-Signature` 값을 hex 그대로 남기는 SDK 로거."""
 
 
 def mask_presigned_url(url: str) -> str:
     """object key까지만 남기고 query string을 지운다."""
     base, separator, _ = url.partition("?")
     return f"{base}?<redacted>" if separator else base
+
+
+def suppress_sdk_signature_logs() -> None:
+    """서명을 남기는 SDK 로거를 DEBUG 아래로 내린다."""
+    for name in _SIGNATURE_LOGGERS:
+        logging.getLogger(name).setLevel(logging.INFO)

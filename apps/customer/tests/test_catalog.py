@@ -179,6 +179,8 @@ def test_categories_query_filters_translation_before_count_and_pagination(
     assert "LIMIT" not in count_sql
     assert "OFFSET" not in count_sql
     assert "ORDER BY category.id" in page_sql
+    assert "image.s3_key AS category_icon_uri" in page_sql
+    assert "LEFT OUTER JOIN image ON image.id = category.image_id" in page_sql
     assert "LIMIT 2 OFFSET 2" in page_sql
 
 
@@ -203,10 +205,18 @@ def test_places_query_applies_filters_before_count_and_page(
         assert "JOIN place_translation ON place_translation.place_id = place.id" in sql
         assert "place_translation.language_code = 'EN'" in sql
         assert "place.category_id = 10" in sql
-    assert "ORDER BY" not in count_sql
+    # 이미지 집계 안의 ORDER BY place_image.seq는 페이지 정렬이 아니다.
+    assert "ORDER BY place." not in count_sql
     assert "LIMIT" not in count_sql
     assert "OFFSET" not in count_sql
     assert "ORDER BY place.category_id, place.category_sequence, place.id" in page_sql
+    assert (
+        "array_agg(image.s3_key ORDER BY place_image.seq) AS place_image_uri"
+    ) in page_sql
+    assert (
+        "LEFT OUTER JOIN (SELECT place_image.place_id" in page_sql
+        and "AS place_images ON place_images.place_id = place.id" in page_sql
+    )
     assert "LIMIT 1 OFFSET 1" in page_sql
 
 
@@ -379,6 +389,8 @@ def test_detail_builds_left_join_and_ordered_menu_query(
     assert "menu_translation.language_code = 'EN'" in menu_sql
     assert "menu.place_id = 40" in menu_sql
     assert "ORDER BY menu.id" in menu_sql
+    assert "image.s3_key AS image_url" in menu_sql
+    assert "LEFT OUTER JOIN image ON image.id = menu.image_id" in menu_sql
 
 
 @pytest.mark.parametrize(

@@ -11,12 +11,15 @@ from datetime import UTC, datetime
 
 from backoffice.config import get_settings
 from backoffice.images.cleanup import sweep
+from backoffice.images.masking import suppress_sdk_signature_logs
 from backoffice.images.s3 import S3ObjectStore
 from quinquatria_persistence import Database
 
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
+    # basicConfig 뒤에 건다. 스케줄러가 레벨을 DEBUG로 올려도 서명은 안 남는다.
+    suppress_sdk_signature_logs()
     settings = get_settings()
     database = Database(settings.database_url)
     store = S3ObjectStore(
@@ -25,14 +28,13 @@ async def main() -> None:
         endpoint_url=settings.s3_endpoint_url,
     )
     try:
-        async with database.transaction() as session:
-            report = await sweep(
-                session,
-                store,
-                now=datetime.now(UTC),
-                grace_seconds=settings.cleanup_grace_seconds,
-                batch_size=settings.cleanup_batch_size,
-            )
+        report = await sweep(
+            database,
+            store,
+            now=datetime.now(UTC),
+            grace_seconds=settings.cleanup_grace_seconds,
+            batch_size=settings.cleanup_batch_size,
+        )
         logging.getLogger(__name__).info(
             "cleanup 완료: deleted=%s failed=%s orphans=%s",
             report.deleted,

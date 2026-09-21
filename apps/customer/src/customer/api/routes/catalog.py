@@ -3,7 +3,8 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Query
-from sqlalchemy import Select, and_, select
+from sqlalchemy import Select, and_, func, select
+from sqlalchemy.dialects.postgresql import aggregate_order_by
 
 from common.errors import ApiError, ErrorCode, ErrorResponse
 from common.pagination import Page
@@ -21,9 +22,11 @@ from customer.api.schemas.catalog import (
 from quinquatria_persistence import (
     Category,
     CategoryTranslation,
+    Image,
     Menu,
     MenuTranslation,
     Place,
+    PlaceImage,
     PlaceTranslation,
 )
 
@@ -34,6 +37,19 @@ router = APIRouter(
 
 
 def _select_places() -> Select:
+    # 이미지가 없는 장소는 집계 행이 없어 외부 조인 결과가 NULL이 된다.
+    # 기존 `place_image_uri` 배열이 비어 있을 수 없던 계약과 같다.
+    images = (
+        select(
+            PlaceImage.place_id,
+            func.array_agg(aggregate_order_by(Image.s3_key, PlaceImage.seq)).label(
+                "place_image_uri"
+            ),
+        )
+        .join(Image, Image.id == PlaceImage.image_id)
+        .group_by(PlaceImage.place_id)
+        .subquery("place_images")
+    )
     return select(
         Place.id,
         Place.category_id,
@@ -42,12 +58,12 @@ def _select_places() -> Select:
         Place.y,
         Place.start_hour,
         Place.end_hour,
-        Place.place_image_uri,
+        images.c.place_image_uri,
         PlaceTranslation.language_code,
         PlaceTranslation.name,
         PlaceTranslation.host_college,
         PlaceTranslation.description,
-    )
+    ).select_from(Place.__table__.outerjoin(images, images.c.place_id == Place.id))
 
 
 @router.get("/categories")
@@ -58,10 +74,12 @@ async def list_categories(
         select(
             Category.id,
             Category.code,
-            Category.category_icon_uri,
+            Image.s3_key.label("category_icon_uri"),
             CategoryTranslation.language_code,
             CategoryTranslation.name,
         )
+        .select_from(Category)
+        .outerjoin(Image, Image.id == Category.image_id)
         .join(CategoryTranslation, CategoryTranslation.category_id == Category.id)
         .where(CategoryTranslation.language_code == query.language_code.value)
         .order_by(Category.id)
@@ -117,12 +135,14 @@ async def get_place(
         select(
             Menu.id,
             Menu.place_id,
-            Menu.image_url,
+            Image.s3_key.label("image_url"),
             Menu.price,
             MenuTranslation.language_code,
             MenuTranslation.name,
             MenuTranslation.description,
         )
+        .select_from(Menu)
+        .outerjoin(Image, Image.id == Menu.image_id)
         .join(MenuTranslation, MenuTranslation.menu_id == Menu.id)
         .where(
             Menu.place_id == place_id,

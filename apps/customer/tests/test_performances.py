@@ -61,7 +61,7 @@ def test_customer_projection_does_not_mutate_shared_metadata():
     assert set(_PERFORMANCE.c.keys()) == {
         "id",
         "type",
-        "image_uri",
+        "image_id",
         "date",
         "seq",
         "is_live",
@@ -171,7 +171,8 @@ def test_performance_list_builds_translation_filter_and_stable_order(
     assert response.status_code == 200
     sql = compiled_sql(mock_session.execute.await_args.args[0])
     assert (
-        "FROM performance JOIN performance_translation ON "
+        "FROM performance LEFT OUTER JOIN image ON image.id = performance.image_id "
+        "JOIN performance_translation ON "
         "performance_translation.performance_id = performance.id" in sql
     )
     assert f"performance_translation.language_code = '{language}'" in sql
@@ -184,7 +185,8 @@ def test_performance_list_builds_translation_filter_and_stable_order(
 
     count_sql = compiled_sql(mock_session.scalar.await_args.args[0])
     assert (
-        "FROM performance JOIN performance_translation ON "
+        "FROM performance LEFT OUTER JOIN image ON image.id = performance.image_id "
+        "JOIN performance_translation ON "
         "performance_translation.performance_id = performance.id" in count_sql
     )
     assert f"performance_translation.language_code = '{language}'" in count_sql

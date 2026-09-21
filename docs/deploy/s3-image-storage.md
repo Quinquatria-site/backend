@@ -85,6 +85,11 @@ bucket policy에서도 이 조건이 없는 `PutObject`를 거부해, 서명을 
 | `BACKOFFICE_CLEANUP_GRACE_SECONDS`     | 아니요 | `86400`    |
 | `BACKOFFICE_CLEANUP_BATCH_SIZE`        | 아니요 | `500`      |
 
+`BACKOFFICE_MAX_IMAGE_BYTES`는 기본값보다 낮추는 것만 된다. 원장의
+`ck_image_declared_size_in_range`와 `ck_image_byte_size_in_range`가 10 MiB로
+고정돼 있어, 더 큰 값을 주면 앱이 뜨지 않는다. 상한을 실제로 올리려면 두
+CHECK를 바꾸는 마이그레이션이 함께 필요하다.
+
 `DATABASE_URL`만 앱 prefix가 없다. Backoffice와 Customer가 같은 DB를 쓰고
 `alembic upgrade`도 같은 변수를 읽으므로, 앱마다 다른 이름을 두면 한쪽만
 바꿨을 때 서로 다른 DB를 가리켜도 아무도 알아채지 못한다. cleanup 작업도
@@ -100,4 +105,8 @@ bucket policy에서도 이 조건이 없는 `PutObject`를 거부해, 서명을 
 - presigned URL의 query string은 만료 전까지 해당 key에 대한 업로드 권한
   그 자체다. access log와 application log에서 마스킹한다.
 - 응답 본문 외 어디에도 서명을 남기지 않는다.
+- AWS SDK는 DEBUG에서 서명 값을 그대로 남기므로, 앱이 기동할 때
+  `botocore.auth` 로거를 INFO로 내린다. 전역 로그 레벨을 DEBUG로 올려도
+  서명은 올라오지 않는다. SDK 서명 과정을 디버깅하려면 코드에서 이 억제를
+  빼야 한다.
 - bucket 이름과 내부 key 구조를 오류 응답에 담지 않는다.

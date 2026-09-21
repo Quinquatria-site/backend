@@ -108,12 +108,21 @@ async def attach(
 
     호출자는 반환된 `Image.id`를 리소스의 `image_id`에 넣는다. 같은
     transaction에서 실행해야 검증과 연결이 함께 성립한다.
+
+    행을 잠그고 읽는다. 잠그지 않으면 같은 key를 동시에 연결하는 두
+    요청이 모두 `UPLOADING`을 보고 아래 검사를 통과한다. 그러면 판정이
+    리소스의 unique 제약으로 밀려 `IntegrityError`가 되는데, 그것은
+    명세 §4.6이 정한 409가 아니다. 상태를 읽는 순간부터 전이를 commit할
+    때까지 다른 transaction이 끼어들지 못하게 해야 뒤에 온 요청도
+    `ATTACHED`를 보고 `IMAGE_ALREADY_ATTACHED`로 거절된다.
     """
     if not matches_prefix(object_key, resource_type):
         raise _invalid()
 
     image = (
-        await session.execute(select(Image).where(Image.s3_key == object_key))
+        await session.execute(
+            select(Image).where(Image.s3_key == object_key).with_for_update()
+        )
     ).scalar_one_or_none()
     if image is None or image.resource_type is not resource_type:
         raise _invalid()

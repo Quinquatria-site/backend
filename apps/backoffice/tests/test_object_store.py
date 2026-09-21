@@ -20,16 +20,20 @@ REGION = "ap-northeast-2"
 KEY = "images/place/example.webp"
 
 
-@pytest.fixture
-def store() -> S3ObjectStore:
+def build_store(region: str) -> S3ObjectStore:
     # 정적 키를 설정에 두지 않는다는 규칙은 운영 코드에만 적용된다.
     # 테스트는 서명을 만들기 위해 더미 credential을 명시로 주입한다.
     return S3ObjectStore(
         bucket=BUCKET,
-        region=REGION,
+        region=region,
         access_key_id="AKIAIOSFODNN7EXAMPLE",
         secret_access_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
     )
+
+
+@pytest.fixture
+def store() -> S3ObjectStore:
+    return build_store(REGION)
 
 
 async def test_presigned_url_points_at_the_requested_key(store: S3ObjectStore) -> None:
@@ -60,6 +64,22 @@ async def test_signature_is_present(store: S3ObjectStore) -> None:
     url = await store.presign_put(KEY, content_type="image/webp", expires_in=300)
 
     assert parse_qs(urlparse(url).query)["X-Amz-Signature"]
+
+
+# SigV2를 아직 받아주는 리전들. 서명 방식을 endpoint 해석에 맡기면 여기서만
+# SigV2로 떨어지고, 헤더를 서명할 수단이 없어 If-None-Match가 사라진다.
+@pytest.mark.parametrize("region", ["ap-northeast-2", "us-east-1", "eu-west-1"])
+async def test_presign_uses_sigv4_in_every_region(region: str) -> None:
+    url = await build_store(region).presign_put(
+        KEY, content_type="image/webp", expires_in=300
+    )
+
+    query = parse_qs(urlparse(url).query)
+
+    assert query["X-Amz-Algorithm"] == ["AWS4-HMAC-SHA256"]
+    signed = query["X-Amz-SignedHeaders"][0].split(";")
+    assert "content-type" in signed
+    assert "if-none-match" in signed
 
 
 async def test_fake_head_reports_the_stored_object() -> None:

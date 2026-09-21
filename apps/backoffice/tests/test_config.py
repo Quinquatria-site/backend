@@ -337,6 +337,24 @@ def test_max_image_bytes_is_ten_mebibytes() -> None:
     assert MAX_IMAGE_BYTES == 10 * 1024 * 1024
 
 
+def test_max_image_bytes_can_be_lowered(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_required(monkeypatch)
+    monkeypatch.setenv("BACKOFFICE_MAX_IMAGE_BYTES", "1048576")
+
+    assert Settings().max_image_bytes == 1048576
+
+
+def test_max_image_bytes_cannot_exceed_the_ledger_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """설정만 더 크면 flush에서 CHECK가 터져 413/422가 내부 오류가 된다."""
+    _set_required(monkeypatch)
+    monkeypatch.setenv("BACKOFFICE_MAX_IMAGE_BYTES", str(MAX_IMAGE_BYTES + 1))
+
+    with pytest.raises(ValidationError):
+        Settings()
+
+
 def test_database_url_is_read_without_the_app_prefix(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

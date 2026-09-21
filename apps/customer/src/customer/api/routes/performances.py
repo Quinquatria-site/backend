@@ -12,14 +12,14 @@ from common.types import ResourceId
 from customer.api.dependencies import ReadSession
 from customer.api.queries import is_storable_id, paginate
 from customer.api.schemas.performance import PerformanceListQuery, PerformanceResponse
-from quinquatria_persistence import Performance, PerformanceTranslation
+from quinquatria_persistence import Image, Performance, PerformanceTranslation
 
 # 실제 DB가 API 명세의 date/seq/is_live 스키마로 전환되기 전까지 사용하는 임시 테이블 정의다.
 _PERFORMANCE = table(
     "performance",
     column("id", Integer()),
     column("type", Performance.__table__.c.type.type),
-    column("image_uri", Text()),
+    column("image_id", Integer()),
     column("date", Date()),
     column("seq", Integer()),
     column("is_live", Boolean()),
@@ -39,16 +39,20 @@ router = APIRouter(
 
 
 def _select_performances() -> Select:
-    return select(
-        _PERFORMANCE.c.id,
-        _PERFORMANCE.c.type,
-        _PERFORMANCE.c.image_uri,
-        _PERFORMANCE.c.date,
-        _PERFORMANCE.c.seq,
-        _PERFORMANCE.c.is_live,
-        _PERFORMANCE_TRANSLATION.c.language_code,
-        _PERFORMANCE_TRANSLATION.c.title,
-        _PERFORMANCE_TRANSLATION.c.description,
+    return (
+        select(
+            _PERFORMANCE.c.id,
+            _PERFORMANCE.c.type,
+            Image.s3_key.label("image_uri"),
+            _PERFORMANCE.c.date,
+            _PERFORMANCE.c.seq,
+            _PERFORMANCE.c.is_live,
+            _PERFORMANCE_TRANSLATION.c.language_code,
+            _PERFORMANCE_TRANSLATION.c.title,
+            _PERFORMANCE_TRANSLATION.c.description,
+        )
+        .select_from(_PERFORMANCE)
+        .outerjoin(Image, Image.id == _PERFORMANCE.c.image_id)
     )
 
 

@@ -54,7 +54,8 @@ class Settings(BaseSettings):
     s3_endpoint_url: str | None = None
     token_ttl_seconds: int = Field(18000, ge=1)
     presigned_url_ttl_seconds: int = Field(300, ge=1)
-    max_image_bytes: int = Field(MAX_IMAGE_BYTES, ge=1)
+    max_image_bytes: int = Field(MAX_IMAGE_BYTES, ge=1, le=MAX_IMAGE_BYTES)
+    """낮추는 것만 허용한다. 원장 CHECK가 10 MiB로 고정돼 있다."""
     cleanup_grace_seconds: int = Field(86400, ge=0)
     cleanup_batch_size: int = Field(500, ge=1)
 

@@ -8,11 +8,15 @@
 from collections.abc import AsyncIterator
 
 import aioboto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from backoffice.images.store import ObjectHead, ObjectSummary
 
 _MISSING = {"404", "NoSuchKey", "NotFound"}
+
+_SIGV4 = Config(signature_version="s3v4")
+"""옛 리전은 endpoint 해석에서 SigV2가 먼저 걸려 `If-None-Match` 서명이 빠진다."""
 
 
 class S3ObjectStore:
@@ -36,7 +40,9 @@ class S3ObjectStore:
         )
 
     def _client(self):
-        return self._session.client("s3", endpoint_url=self._endpoint_url)
+        return self._session.client(
+            "s3", endpoint_url=self._endpoint_url, config=_SIGV4
+        )
 
     async def presign_put(self, key: str, *, content_type: str, expires_in: int) -> str:
         """`PutObject` 한 작업과 필수 헤더에만 유효한 URL을 만든다.
