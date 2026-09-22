@@ -8,12 +8,57 @@
 받는 암묵 변환은 필드에 `StrictBool`, `StrictInt`를 써서 막는다.
 """
 
+import unicodedata
 from collections.abc import Sequence
+from functools import partial
 from typing import Annotated, ClassVar, Self
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, model_validator
 
 from quinquatria_persistence.enums import LanguageCode
+
+
+def _clean(value: str, *, allowed: frozenset[str], required: bool) -> str:
+    """앞뒤 공백을 자르고 저장·응답을 깨뜨리는 문자를 거부한다.
+
+    NUL은 PostgreSQL `text`에 들어가지 못하고, 짝 없는 서로게이트는 UTF-8로
+    인코딩되지 않아 거르지 않으면 500이 된다. 이모지(ZWJ, 변형 선택자 포함)는
+    제어 문자가 아니므로 통과한다.
+    """
+    value = value.strip()
+    if required and not value:
+        raise ValueError("must not be blank")
+    for char in value:
+        category = unicodedata.category(char)
+        if category == "Cs":
+            raise ValueError("must not contain unpaired surrogates")
+        if category == "Cc" and char not in allowed:
+            raise ValueError("must not contain control characters")
+    return value
+
+
+_NONE: frozenset[str] = frozenset()
+_LINE_BREAKS = frozenset("\n\r\t")
+
+type RequiredLine = Annotated[
+    str, AfterValidator(partial(_clean, allowed=_NONE, required=True))
+]
+"""한 줄 필수 필드. `name`, `title`, `host_college`."""
+
+type OptionalLine = Annotated[
+    str, AfterValidator(partial(_clean, allowed=_NONE, required=False))
+]
+"""한 줄 선택 필드. `found_location`."""
+
+type RequiredText = Annotated[
+    str, AfterValidator(partial(_clean, allowed=_LINE_BREAKS, required=True))
+]
+"""본문형 필수 필드. `content`."""
+
+type OptionalText = Annotated[
+    str, AfterValidator(partial(_clean, allowed=_LINE_BREAKS, required=False))
+]
+"""본문형 선택 필드. `description`."""
 
 
 class RequestModel(BaseModel):

@@ -85,6 +85,15 @@ Customer API와 Backoffice API는 별도 FastAPI 애플리케이션으로 배포
 - 번역의 `description`과 `found_location`은 선택이며 생략하면 빈
   문자열로 저장한다. 응답에는 항상 문자열로 포함하며 `null`이 아니다.
   나머지 번역 필드는 필수다.
+- 번역 텍스트 필드는 앞뒤 공백을 제거한 값으로 저장한다. 필수 필드는
+  제거 후 1자 이상이어야 하며, 빈 문자열이나 공백만 보내면
+  `422 VALIDATION_ERROR`다.
+- 본문형 필드(`description`, `content`)는 줄바꿈(`\n`, `\r`)과 탭을
+  허용한다. 한 줄 필드(`name`, `title`, `host_college`,
+  `found_location`)는 줄바꿈을 포함해 제어 문자를 허용하지 않는다.
+- 그 외 제어 문자(NUL 포함)와 짝이 없는 UTF-16 서로게이트(`\ud83d` 단독
+  등)는 모든 번역 필드에서 `422 VALIDATION_ERROR`다. 이모지는 ZWJ 조합과
+  변형 선택자를 포함해 모든 번역 필드에서 허용한다.
 - 응답 본문이 없는 `204 No Content`에는 Content-Type과 JSON 본문을
   포함하지 않는다.
 
