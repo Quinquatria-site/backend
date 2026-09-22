@@ -4,7 +4,7 @@
 | ----------------- | ---------------------------- |
 | 문서 버전         | v0.3                         |
 | 작성일            | 2026-09-09                   |
-| 최종 수정일       | 2026-09-14                   |
+| 최종 수정일       | 2026-09-22                   |
 | 기준 문서         | [PRD](./PRD.md)              |
 | 대상 애플리케이션 | Customer API, Backoffice API |
 | API 버전          | v1                           |
@@ -1189,8 +1189,10 @@ Content-Type: application/json
 엔드포인트는 `is_live` 외의 필드를 받지 않으며 다른 필드를 보내면
 `422 VALIDATION_ERROR`다.
 
-commit이 성공하면 7.1의 자동 재검증 규칙에 따라 `PERFORMANCES` 대상
-ISR 재검증을 요청한다.
+commit이 성공하면 7.1의 자동 재검증 규칙에 따라
+`target=PERFORMANCES`, `resource_type=PERFORMANCE`로 `id` 없이 ISR
+재검증을 한 번 요청한다. 기존 live 공연도 함께 바뀔 수 있으므로 개별
+공연 ID로 범위를 제한하지 않는다.
 
 #### PUT `/api/v1/performances/reorder`
 
@@ -1249,8 +1251,9 @@ ISR 재검증을 요청한다.
 `422 VALIDATION_ERROR`다. 이 엔드포인트는 `date`와 `order` 외의 필드를
 받지 않으며 다른 필드를 보내면 `422 VALIDATION_ERROR`다.
 
-commit이 성공하면 7.1의 자동 재검증 규칙에 따라 `PERFORMANCES` 대상
-ISR 재검증을 요청한다.
+commit이 성공하면 7.1의 자동 재검증 규칙에 따라
+`target=PERFORMANCES`, `resource_type=PERFORMANCE`로 `id` 없이 ISR
+재검증을 한 번 요청한다. 변경된 공연 수만큼 요청하지 않는다.
 
 ### 5.7 Notice 스키마
 
@@ -1394,16 +1397,32 @@ Backoffice의 기본 리소스 `POST`, `PATCH`, `DELETE`, 번역 `DELETE`와
 바꾸는 `PUT /performances/reorder`가 DB transaction을 성공적으로 commit한
 뒤 해당 Customer 페이지의 ISR 재검증을 요청한다.
 
-| 변경 리소스           | 재검증 target  |
-| --------------------- | -------------- |
-| Category, Place, Menu | `PLACES`       |
-| Performance           | `PERFORMANCES` |
-| Notice                | `NOTICES`      |
-| LostItem              | `LOST_ITEMS`   |
+| 변경 리소스 | `target` | `resource_type` |
+| ----------- | -------- | --------------- |
+| Category | `PLACES` | `CATEGORY` |
+| Place | `PLACES` | `PLACE` |
+| Menu | `PLACES` | `MENU` |
+| Performance | `PERFORMANCES` | `PERFORMANCE` |
+| Notice | `NOTICES` | `NOTICE` |
+| LostItem | `LOST_ITEMS` | `LOST_ITEM` |
+
+`target`은 갱신할 도메인 범위이고 `resource_type`은 변경된 기본 리소스
+종류다. 단건 `POST`, `PATCH`, `DELETE`와 번역 `DELETE`에는 해당 기본
+리소스의 백엔드 ID를 `id`로 보낸다. 번역 ID나 프론트엔드 mock ID로
+변환하지 않는다. 예를 들어 메뉴 번역 삭제는
+`{"target": "PLACES", "resource_type": "MENU", "id": 101}`이다.
+생성은 DB에서 발급된 ID, 삭제는 삭제 직전의 ID를 사용한다.
+
+`PUT /performances/{id}/live`와 `PUT /performances/reorder`는 여러 공연에
+영향을 주므로 `target=PERFORMANCES`, `resource_type=PERFORMANCE`만
+담고 `id` 없이 한 번 요청한다.
 
 자동 재검증은 post-commit best-effort 작업이다. CRUD 성공 응답은 DB 반영
-성공을 의미하며 재검증 완료를 의미하지 않는다. 자동 요청 실패는
-운영 로그와 모니터링에 기록하고 운영자가 수동 재검증 API로 재시도한다.
+성공을 의미하며 재검증 완료를 의미하지 않는다. commit 이전이나 rollback
+시에는 전송하지 않는다. commit 이후 응답의 background task로 전송하며,
+최종 전송 실패가 이미 성공한 CRUD 응답이나 DB 반영을 되돌리지 않는다.
+실패는 운영 로그에 기록하고 운영자가 수동 재검증 API로 재시도한다.
+내구성 큐가 없으므로 프로세스 종료 시 미전송 요청이 유실될 수 있다.
 
 ### 7.2 수동 재검증
 
@@ -1415,27 +1434,72 @@ Bearer 인증이 필요하다.
 
 ```json
 {
-    "target": "NOTICES"
+    "target": "NOTICES",
+    "resource_type": "NOTICE",
+    "id": 301
 }
 ```
 
-| 필드     | 타입        | 필수 | 허용값                                            |
-| -------- | ----------- | ---- | ------------------------------------------------- |
-| `target` | string enum | 예   | `PLACES`, `PERFORMANCES`, `NOTICES`, `LOST_ITEMS` |
+| 필드 | 타입 | 필수 | 설명 |
+| ---- | ---- | ---- | ---- |
+| `target` | string enum | 예 | `PLACES`, `PERFORMANCES`, `NOTICES`, `LOST_ITEMS` |
+| `resource_type` | string enum | 예 | `CATEGORY`, `PLACE`, `MENU`, `PERFORMANCE`, `NOTICE`, `LOST_ITEM` |
+| `id` | integer 또는 null | 아니요 | 변경된 기본 리소스의 백엔드 양의 정수 ID |
 
-요청을 접수하면 `202 Accepted`를 반환한다.
+`target`과 `resource_type`은 7.1 표의 조합만 허용한다. 잘못된 조합,
+허용되지 않은 enum, `null`이 아니면서 양의 정수가 아닌 `id`는
+`422 VALIDATION_ERROR`다. `id`를 생략하거나 `null`로 보내면 해당 도메인
+범위를 재검증한다. 삭제된 리소스도 재시도할 수 있도록 ID의 DB 존재 여부는
+검사하지 않는다.
+
+프론트엔드 수신기가 `2xx`로 접수한 뒤 `202 Accepted`를 반환한다.
+응답에는 요청 필드와 `accepted: true`를 포함한다. 요청에서 `id`를
+생략하거나 `null`로 보냈다면 응답에서도 `id`를 생략한다.
 
 ```json
 {
     "target": "NOTICES",
+    "resource_type": "NOTICE",
+    "id": 301,
     "accepted": true
 }
 ```
 
-`202`는 재검증 요청을 접수했다는 의미이며 프론트엔드 재생성 완료를
-보장하지 않는다. 요청 자체를 접수하지 못하면
-`500 INTERNAL_SERVER_ERROR`를 반환한다. ERD에 작업 상태 모델이 없으므로
-재검증 상태 조회 API는 제공하지 않는다.
+`202`는 수신기의 접수를 확인했다는 의미이며 프론트엔드 재생성 완료를
+보장하지 않는다. 7.3의 재시도 후에도 수신기 접수를 확인하지 못하거나
+전송 설정이 없으면 `500 INTERNAL_SERVER_ERROR`를 반환한다. ERD에 작업
+상태 모델이 없으므로 재검증 상태 조회 API는 제공하지 않는다.
+
+### 7.3 프론트엔드 수신기와 전송 계약
+
+Backoffice는 `BACKOFFICE_REVALIDATION_URL`에 설정된 수신기 URL로 JSON
+`POST`를 전송한다. 본문은 7.2 요청과 동일한 `target`, `resource_type`,
+선택적 `id`이며, `null`인 `id`와 `accepted`는 포함하지 않는다. 이 URL은
+공개 Backoffice 수동 API의 URL과 구분한다.
+
+수신기는 `target`의 도메인 범위에서 영향받는 목록·상세·언어별 캐시를
+갱신한다. `id`는 변경된 기본 리소스를 식별하는 추가 정보이며, 해당 상세
+한 곳만 갱신하라는 뜻이 아니다. 실제 페이지 경로와 cache tag 매핑은
+프론트엔드가 소유한다. 백엔드는 경로나 tag를 생성하거나 전달하지 않는다.
+
+프론트엔드 TTL 참고값은 `PERFORMANCES` 60초, `PLACES`·`NOTICES`·
+`LOST_ITEMS` 300초다. 변경 시 요청하는 무효화를 기본으로 사용하고, 이
+시간 기반 재검증은 요청 실패·유실에 대비한 보완 수단으로 둔다. 이는
+프론트엔드 구현의 초기 권장값이며 Backoffice API의 필수 조건이나 전송
+제한 시간이 아니다. [Next.js ISR 안내](https://nextjs.org/docs/app/guides/incremental-static-regeneration)에
+따르면 TTL 경과 직후 첫 방문에는 기존 페이지가 제공되고 재생성이 시작될
+수 있으므로, 권장 초수가 최신 화면 표시의 최대 지연을 보장하지 않는다.
+
+전송은 시도당 전체 5초로 제한한다. 통신 오류, timeout 또는 수신기의
+`502`, `503`, `504`일 때만 500ms 뒤 한 번 재시도한다. 전송 시간 예산은
+두 시도와 대기를 합쳐 최대 10.5초다. 다른 non-2xx 응답이나 설정 오류는
+재시도하지 않으며, redirect를 따라가지 않는다. `2xx` 응답 본문은
+사용하지 않는다. 응답을 받기 전에 연결이 끊기면 이미 접수한 요청을 다시
+보낼 수 있으므로 수신기는 동일 요청의 중복 접수를 허용해야 한다.
+
+수신기 URL 미설정은 앱 기동을 막지 않는다. 다만 실제 전송 시에는 실패로
+처리하므로 자동 요청은 실패 로그를 남기고 수동 요청은 `500`을 반환한다.
+별도의 작업 ID, 내구성 큐, 완료 조회 또는 재생성 완료 보장은 제공하지 않는다.
 
 ## 8. ERD와 API 매핑
 
@@ -1527,8 +1591,10 @@ ERD에는 구역 문자가 없으므로 API가 `A1`과 같은 구역 번호를 �
 24. Place 삭제 시 연결된 Menu와 모든 번역이 삭제된다.
 25. Place가 연결된 Category 삭제는 `409 DELETE_CONFLICT`이며 어떤 행도
     삭제되지 않는다.
-26. Backoffice 쓰기 transaction이 commit된 뒤 올바른 ISR target의
-    재검증이 요청된다.
+26. Backoffice 쓰기 transaction이 commit된 뒤 올바른 `target`과
+    `resource_type`으로 재검증이 요청된다. 단건 변경과 번역 삭제는 기본
+    리소스의 백엔드 ID를 전달하고, live·reorder는 공연 범위 요청을 ID 없이
+    한 번 전달한다. rollback이나 commit 실패 시에는 전송하지 않는다.
 27. 공연 목록과 상세 응답에는 `start_at`과 `end_at`이 없고 `date`,
     `seq`, `is_live`가 포함된다.
 28. 공연 목록은 `date ASC, seq ASC, id ASC`로 정렬되며, `date` query를
@@ -1553,3 +1619,14 @@ ERD에는 구역 문자가 없으므로 API가 `A1`과 같은 구역 번호를 �
 37. `PATCH`로 `date`만 바꾸면 대상 일차의 맨 뒤로 옮겨진다.
 38. 공연을 `DELETE`하거나 `PATCH`로 다른 일차에 옮기면 원래 일차의 남은
     공연이 `1`부터 연속이 되도록 다시 매겨진다.
+39. 수동 재검증은 Bearer 인증과 올바른 `target`·`resource_type` 조합을
+    요구한다. `id` 생략·`null`은 허용하고, 존재하지 않거나 삭제된 양의
+    정수 ID도 재시도할 수 있다.
+40. 수동 재검증은 수신기 `2xx` 후에만 `202`와 요청 필드 및
+    `accepted: true`를 반환한다. 생략·`null`인 `id`는 전송·응답에서 빠진다.
+    최종 전송 실패나 URL 미설정은 `500 INTERNAL_SERVER_ERROR`다.
+41. 재검증 전송은 시도당 전체 5초로 제한하고, 통신 오류·timeout·
+    `502`·`503`·`504`에만 500ms 뒤 한 번 재시도한다. 다른 실패는
+    재시도하지 않으며 수신기는 동일 요청의 중복 접수를 허용한다.
+42. 자동 재검증의 최종 실패는 이미 commit된 DB 변경과 CRUD 성공 응답에
+    영향을 주지 않는다. 실패 로그를 남기며 내구성 큐나 상태 조회는 없다.

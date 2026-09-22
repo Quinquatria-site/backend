@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     cleanup_grace_seconds: int = Field(86400, ge=0)
     cleanup_batch_size: int = Field(500, ge=1)
 
+    revalidation_url: str | None = Field(default=None, repr=False)
+    """프론트 수신 URL. 미설정 상태에서도 시작하며 전송 시 실패로 처리한다."""
+
     @field_validator("issuance_code")
     @classmethod
     def _issuance_code_is_strong_enough(cls, value: SecretStr) -> SecretStr:
