@@ -6,6 +6,7 @@ from sqlalchemy.exc import DBAPIError
 
 from ._data import (
     DEFAULT_EMPTY_COLUMNS,
+    FESTIVAL_DAY,
     INSTANT,
     NULLABLE_IMAGE_COLUMNS,
     TABLES,
@@ -202,7 +203,8 @@ async def test_enums_accept_exact_values_and_reject_unknown_or_lowercase(
         ("place", "category_sequence", -1),
         ("menu", "price", -1),
         ("place", "end_hour", INSTANT - timedelta(microseconds=1)),
-        ("performance", "end_at", INSTANT - timedelta(microseconds=1)),
+        ("performance", "seq", 0),
+        ("performance", "seq", -1),
     ],
 )
 async def test_ranges_reject_values_beyond_the_boundary(
@@ -228,9 +230,14 @@ async def test_boundary_values_round_trip(database, rows):
         assert place["x"] == 12.25
         assert place["y"] == -7.5
         assert await connection.scalar(text("SELECT price FROM menu")) == 0
-        assert await connection.scalar(
-            text("SELECT start_at = end_at FROM performance")
+        performance = (
+            (await connection.execute(text("SELECT * FROM performance WHERE id = 1")))
+            .mappings()
+            .one()
         )
+        assert performance["date"] == FESTIVAL_DAY
+        assert performance["seq"] == 1
+        assert performance["is_live"] is False
         for table in ("notice", "lost_item"):
             created_at = await connection.scalar(
                 text(f"SELECT created_at FROM {table}")
@@ -246,7 +253,6 @@ async def test_boundary_values_round_trip(database, rows):
     ("table", "columns"),
     [
         ("place", ("start_hour", "end_hour")),
-        ("performance", ("start_at", "end_at")),
         ("notice", ("created_at",)),
         ("lost_item", ("created_at",)),
     ],

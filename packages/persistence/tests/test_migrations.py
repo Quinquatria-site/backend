@@ -29,7 +29,7 @@ EXPECTED_INDEXES = {
     "place": {("category_id", "category_sequence", "id")},
     "place_image": {("place_id", "seq")},
     "menu": {("place_id", "id")},
-    "performance": {("start_at", "id"), ("type", "start_at", "id")},
+    "performance": {("date", "seq", "id"), ("type", "date", "seq", "id")},
     "notice": {("created_at", "id"), ("type", "created_at", "id")},
     "lost_item": {("created_at", "id"), ("is_returned", "created_at", "id")},
     "image": {("status", "created_at"), ("status", "detached_at")},
@@ -53,6 +53,8 @@ def assert_schema(connection):
             expected_fields |= {"byte_size", "created_at", "updated_at", "detached_at"}
             assert columns["created_at"]["default"] is not None
             assert columns["updated_at"]["default"] is not None
+        elif table == "performance":
+            assert columns["is_live"]["default"] == "false"
         assert set(columns) == expected_fields
         assert {
             (table, column["name"]) for column in columns.values() if column["nullable"]
