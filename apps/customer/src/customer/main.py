@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from common.app import create_api_app
+from common.app import cors_origins_from_env, create_api_app
 from customer.api.router import api_router
 from quinquatria_persistence import Database
 
@@ -27,7 +27,10 @@ def create_app(database_url: str | None = None) -> FastAPI:
             del application.state.database
 
     return create_api_app(
-        title="Quinquatria Customer API", router=api_router, lifespan=lifespan
+        title="Quinquatria Customer API",
+        router=api_router,
+        lifespan=lifespan,
+        cors_origins=cors_origins_from_env,
     )
 
 

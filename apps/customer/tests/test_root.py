@@ -35,3 +35,12 @@ def test_unknown_path_uses_the_shared_error_body() -> None:
 
 def test_create_app_returns_new_instance() -> None:
     assert create_app() is not create_app()
+
+
+def test_cors_origins_come_from_the_environment(monkeypatch) -> None:
+    origin = "https://front.example.com"
+    monkeypatch.setenv("CORS_ALLOW_ORIGINS", origin)
+
+    response = TestClient(create_app()).get("/api/v1/", headers={"Origin": origin})
+
+    assert response.headers["access-control-allow-origin"] == origin
