@@ -224,6 +224,21 @@ def test_the_route_audit_catches_an_unprotected_route(settings) -> None:
     assert _unprotected(leaky, settings) == ["GET /api/v1/forgot-to-protect"]
 
 
+def test_openapi_declares_the_bearer_scheme_only_on_protected_routes() -> None:
+    """Swagger UI의 Authorize 버튼이 이 선언으로 토큰을 받아 요청에 싣는다."""
+    schema = create_api_app(title="Route Audit", router=api_router).openapi()
+
+    schemes = schema["components"]["securitySchemes"]
+    assert [scheme for scheme in schemes.values()] == [
+        {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}
+    ]
+    (name,) = schemes
+    for path, operations in schema["paths"].items():
+        for method, operation in operations.items():
+            expected = None if path in PUBLIC_PATHS else [{name: []}]
+            assert operation.get("security") == expected, f"{method.upper()} {path}"
+
+
 def test_public_paths_are_actually_registered() -> None:
     """공개 목록에 오타가 있으면 보호 누락이 조용히 통과한다."""
     application = create_api_app(title="Route Audit", router=api_router)
