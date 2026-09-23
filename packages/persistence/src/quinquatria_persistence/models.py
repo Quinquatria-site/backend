@@ -160,6 +160,9 @@ class Place(_IdentityMixin, Base):
         CheckConstraint("id > 0", name="id_positive"),
         CheckConstraint("category_sequence >= 1", name="category_sequence_positive"),
         CheckConstraint("end_hour >= start_hour", name="hours_ordered"),
+        # 구역 번호(A1 …)가 두 장소에 붙지 않게 한다. 요청 하나가 한 행만 바꾸므로
+        # `place_image`와 달리 지연하지 않는다 (명세 §5.4, §8).
+        UniqueConstraint("category_id", "category_sequence"),
         Index(None, "category_id", "category_sequence", "id"),
     )
 

@@ -4,7 +4,7 @@
 | ----------------- | ---------------------------- |
 | 문서 버전         | v0.3                         |
 | 작성일            | 2026-09-09                   |
-| 최종 수정일       | 2026-09-14                   |
+| 최종 수정일       | 2026-09-23                   |
 | 기준 문서         | [PRD](./PRD.md)              |
 | 대상 애플리케이션 | Customer API, Backoffice API |
 | API 버전          | v1                           |
@@ -992,7 +992,7 @@ Content-Type: application/json
 | ------------------- | ------------------ | ------------- | ------------------- | ------------------------------------------ |
 | `id`                | integer            | 서버 생성     | 수정 불가           | 장소 ID                                    |
 | `category_id`       | integer            | 필수          | 선택                | 존재하는 카테고리 ID                       |
-| `category_sequence` | integer            | 필수          | 선택                | 1 이상의 카테고리 내 순서                  |
+| `category_sequence` | integer            | 필수          | 선택                | 1 이상, 카테고리 내에서 유일한 순서        |
 | `x`                 | number             | 필수          | 선택                | 지도 x 좌표                                |
 | `y`                 | number             | 필수          | 선택                | 지도 y 좌표                                |
 | `start_hour`        | datetime string    | 필수          | 선택                | 운영 시작 시각                             |
@@ -1004,6 +1004,20 @@ Content-Type: application/json
 같은 것은 허용한다. 존재하지 않는 `category_id`는
 `404 RESOURCE_NOT_FOUND`다. `category_sequence`가 1 미만이면
 `422 VALIDATION_ERROR`다.
+
+`category_sequence`는 지도에 표기하는 구역+번호(A1, A2 …)의 번호이므로
+같은 카테고리 안에서 유일하다.
+
+- 판정 대상은 요청 반영 후의 `(category_id, category_sequence)` 쌍이다.
+  `PATCH`로 둘 중 하나만 보내면 저장된 나머지 값과 합쳐 판정한다.
+- 다른 장소가 이미 쓰는 쌍이면 `422 VALIDATION_ERROR`다. `details`의
+  `field`는 `category_sequence`다.
+- 카테고리가 다르면 같은 번호를 쓸 수 있다.
+- 장소가 현재 가진 값을 변경 없이 다시 보내는 것은 허용한다.
+- 번호의 연속성은 요구하지 않는다. `1`, `3`, `7`처럼 빈 번호가 있어도 된다.
+  장소를 삭제해도 남은 장소의 번호를 다시 매기지 않는다.
+- 서버가 번호를 정하거나 재정렬하지 않는다. 두 장소의 번호를 맞바꾸려면
+  한 장소를 쓰이지 않는 번호로 먼저 옮긴 뒤 차례로 `PATCH`한다.
 
 `place_image_uri`는 이미지가 없음을 `null`로 표현한다. 배열을 보낼
 때는 다음을 지킨다. 위반은 `422 VALIDATION_ERROR`다.
@@ -1483,6 +1497,11 @@ ERD에는 구역 문자가 없으므로 API가 `A1`과 같은 구역 번호를 �
 않는다. `category_sequence`, `x`, `y`만 반환하고 화면 표기 규칙은
 프론트엔드 계약으로 둔다.
 
+같은 구역 번호가 두 장소에 붙지 않도록 `PLACE`에
+`(category_id, category_sequence)` unique 제약을 둔다. 한 요청이 한 행만
+바꾸므로 공연의 `(date, seq)`와 달리 deferrable로 두지 않는다. 동시 요청이
+같은 쌍을 쓰려다 제약에 걸려도 5.4대로 `422 VALIDATION_ERROR`를 반환한다.
+
 ## 9. 계약 검증 시나리오
 
 1. 일반 공지 목록에는 `type=GENERAL`만, 상시 공지 목록에는
@@ -1562,3 +1581,8 @@ ERD에는 구역 문자가 없으므로 API가 `A1`과 같은 구역 번호를 �
 37. `PATCH`로 `date`만 바꾸면 대상 일차의 맨 뒤로 옮겨진다.
 38. 공연을 `DELETE`하거나 `PATCH`로 다른 일차에 옮기면 원래 일차의 남은
     공연이 `1`부터 연속이 되도록 다시 매겨진다.
+39. 같은 카테고리의 다른 장소가 쓰는 `category_sequence`로 `POST`하거나,
+    `PATCH`로 `category_id` 또는 `category_sequence`를 바꿔 그 쌍이 겹치면
+    `422 VALIDATION_ERROR`다. 동시 요청이 겹쳐도 500이 아니라 422다.
+40. 다른 카테고리의 장소와 같은 `category_sequence`는 허용하고, 장소가
+    자기 값을 다시 보내는 `PATCH`도 허용한다.
