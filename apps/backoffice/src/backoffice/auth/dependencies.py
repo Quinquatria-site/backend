@@ -1,15 +1,19 @@
 """라우트가 주입받는 인증 관련 의존성."""
 
+import logging
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import BackgroundTasks, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backoffice.auth.tokens import invalid_token_error, verify_token
 from backoffice.config import Settings, get_settings
 from backoffice.images.s3 import S3ObjectStore
 from backoffice.images.store import ObjectStore
+from backoffice.revalidation.events import pop_events
+
+logger = logging.getLogger(__name__)
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
@@ -41,10 +45,27 @@ def get_object_store(settings: SettingsDep) -> ObjectStore:
 ObjectStoreDep = Annotated[ObjectStore, Depends(get_object_store)]
 
 
-async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
+async def get_session(
+    request: Request, background_tasks: BackgroundTasks
+) -> AsyncIterator[AsyncSession]:
     """요청 하나가 transaction 하나를 연다."""
     async with request.app.state.database.transaction() as session:
         yield session
+
+    # transaction 진입/실행/commit 예외는 그대로 전파한다. 자동 재검증의 실패만
+    # commit 이후에 격리하며, background 작업에는 닫힌 session을 넘기지 않는다.
+    for event in pop_events(session):
+        try:
+            background_tasks.add_task(
+                request.app.state.revalidation_sender.send_automatic, event
+            )
+        except Exception:
+            logger.warning(
+                "ISR automatic registration failed target=%s resource_type=%s id=%s",
+                event.target.value,
+                event.resource_type.value,
+                event.id,
+            )
 
 
 # `function` scope로 라우트 반환 직후 transaction을 끝낸다. 기본 `request`
