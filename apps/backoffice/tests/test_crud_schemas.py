@@ -108,6 +108,28 @@ def test_create_rejects_coercion_and_server_fields(client, body) -> None:
     assert client.post("/items", json=body).status_code == 422
 
 
+def test_create_rejects_unsupported_language_with_ko(client) -> None:
+    response = client.post(
+        "/items",
+        json={
+            "is_returned": False,
+            "translations": [_ko(), {"language_code": "JA", "title": "t"}],
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "VALIDATION_ERROR"
+
+
+def test_patch_rejects_unsupported_language(client) -> None:
+    response = client.patch(
+        "/items", json={"translations": [{"language_code": "JA", "title": "t"}]}
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "VALIDATION_ERROR"
+
+
 @pytest.mark.parametrize(
     "body",
     [{}, {"translations": []}, {"is_returned": None}],
