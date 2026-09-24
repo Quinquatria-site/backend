@@ -142,6 +142,21 @@ def test_patch_rejects_no_change_and_null(client, body) -> None:
     assert response.json()["code"] == "VALIDATION_ERROR"
 
 
+def test_patch_rejects_duplicate_language(client) -> None:
+    response = client.patch(
+        "/items",
+        json={
+            "translations": [
+                {"language_code": "EN", "title": "a"},
+                {"language_code": "EN", "title": "b"},
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "VALIDATION_ERROR"
+
+
 def test_patch_allows_null_on_nullable_field(client) -> None:
     response = client.patch("/items", json={"image_url": None})
 

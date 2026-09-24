@@ -82,6 +82,17 @@ async def test_new_key_is_attached(database, store) -> None:
     assert await _status(database, image_id) == (ImageStatus.ATTACHED, None)
 
 
+async def test_uploaded_key_is_attached(database, store) -> None:
+    image_id, key = await _image(
+        database, store, "uploaded", status=ImageStatus.UPLOADED
+    )
+
+    result = await _replace(database, store, current_image_id=None, object_key=key)
+
+    assert result == image_id
+    assert await _status(database, image_id) == (ImageStatus.ATTACHED, None)
+
+
 async def test_resending_current_key_changes_nothing(database, store) -> None:
     image_id, key = await _image(database, store, "same", status=ImageStatus.ATTACHED)
 
