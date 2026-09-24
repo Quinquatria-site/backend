@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from typing import Annotated
 
 from fastapi import Depends, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backoffice.auth.tokens import invalid_token_error, verify_token
@@ -13,20 +14,26 @@ from backoffice.images.store import ObjectStore
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
-_BEARER_SCHEME = "bearer"
+_bearer = HTTPBearer(bearerFormat="JWT", auto_error=False)
+"""OpenAPI에 Bearer 스키마를 선언해 Swagger UI의 Authorize로 토큰을 넣게 한다.
+
+`auto_error`를 끄는 이유는 FastAPI 기본 오류 대신 명세 §4.3의 401을 내기 위해서다.
+"""
 
 
-def require_admin(request: Request, settings: SettingsDep) -> None:
+def require_admin(
+    settings: SettingsDep,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+) -> None:
     """`Authorization: Bearer <token>`을 검증한다.
 
     헤더 누락과 토큰 검증 실패를 같은 401로 수렴시킨다.
     """
-    header = request.headers.get("Authorization", "")
-    scheme, _, token = header.partition(" ")
-    if scheme.lower() != _BEARER_SCHEME or not token.strip():
+    token = "" if credentials is None else credentials.credentials.strip()
+    if not token:
         raise invalid_token_error()
 
-    verify_token(token.strip(), signing_key=settings.jwt_signing_key.get_secret_value())
+    verify_token(token, signing_key=settings.jwt_signing_key.get_secret_value())
 
 
 def get_object_store(settings: SettingsDep) -> ObjectStore:
