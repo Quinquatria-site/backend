@@ -150,6 +150,24 @@ async def test_one_translation_per_parent_and_language(database, rows, table):
         assert result.all() == ["CHN", "EN", "KO"]
 
 
+async def test_place_sequence_is_unique_within_a_category(database, rows):
+    """구역 번호가 겹치지 않도록 명세 §8이 DB 제약으로 강제한다."""
+    place = VALID_ROWS["place"]
+    columns = ", ".join(place)
+    parameters = ", ".join(f":{column}" for column in place)
+    await assert_rejected(
+        database,
+        f"INSERT INTO place ({columns}) VALUES ({parameters})",
+        place,
+        "23505",
+    )
+
+    async with database.engine.begin() as connection:
+        other = await insert_row(connection, "category", VALID_ROWS["category"])
+        await insert_row(connection, "place", {**place, "category_id": other})
+        await insert_row(connection, "place", {**place, "category_sequence": 2})
+
+
 @pytest.mark.parametrize(
     ("table", "column", "allowed"),
     [
