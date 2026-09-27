@@ -161,11 +161,25 @@ async def attach_many(
     current_image_ids: Iterable[int],
     max_bytes: int,
 ) -> list[Image]:
-    """순서를 보존하며 배열 전체를 연결한다."""
+    """순서를 보존하며 배열 전체를 연결한다.
+
+    잠금은 요청 순서가 아니라 `id` 순서로 한 번에 건다. 같은 이미지들을
+    [A, B]와 [B, A]로 보낸 두 요청이 각자 첫 행을 쥔 채 서로를 기다리면
+    교착이 된다. 순서를 고정하면 뒤에 온 요청은 앞 요청의 commit을 기다린
+    뒤 `ATTACHED`를 보고 409로 거절된다. 검증과 반환은 요청 순서를 따른다.
+    """
     if not object_keys:
         raise ApiError(ErrorCode.VALIDATION_ERROR)
     if len(set(object_keys)) != len(object_keys):
         raise _invalid()
+
+    locked = await session.execute(
+        select(Image.s3_key, Image.id)
+        .where(Image.s3_key.in_(object_keys))
+        .order_by(Image.id)
+        .with_for_update()
+    )
+    ids_by_key = dict(locked.tuples().all())
 
     owned = set(current_image_ids)
     attached = []
@@ -173,7 +187,7 @@ async def attach_many(
         # 이 key가 현재 리소스가 이미 쓰는 것인지 판정하려면 해당 image id가
         # 소유 집합에 있는지 봐야 한다. 그 결과를 attach에 넘겨 무변경
         # 재전송을 409가 아니라 no-op으로 만든다.
-        image_id = await session.scalar(select(Image.id).where(Image.s3_key == key))
+        image_id = ids_by_key.get(key)
         attached.append(
             await attach(
                 session,
