@@ -18,12 +18,15 @@ from backoffice.domains.notices.schemas import (
     NoticePatch,
     NoticeTranslationOut,
 )
+from common.errors import ErrorResponse
 from common.pagination import Page
 from common.query import NoQuery
 from common.types import ResourceId
 from quinquatria_persistence import LanguageCode, Notice, NoticeTranslation
 
-router = APIRouter(tags=["notices"])
+router = APIRouter(tags=["notices"], responses={422: {"model": ErrorResponse}})
+
+_NOT_FOUND = {404: {"model": ErrorResponse}}
 
 _LANGUAGE_ORDER = {code: index for index, code in enumerate(LanguageCode)}
 
@@ -85,7 +88,7 @@ async def create_notice(
     return _serialize(notice)
 
 
-@router.get("/notices/{notice_id}")
+@router.get("/notices/{notice_id}", responses=_NOT_FOUND)
 async def get_notice(
     notice_id: ResourceId, session: SessionDep, query: Annotated[NoQuery, Query()]
 ) -> NoticeOut:
@@ -95,7 +98,7 @@ async def get_notice(
     return _serialize(notice)
 
 
-@router.patch("/notices/{notice_id}")
+@router.patch("/notices/{notice_id}", responses=_NOT_FOUND)
 async def update_notice(
     notice_id: ResourceId,
     body: NoticePatch,
@@ -122,6 +125,7 @@ async def update_notice(
     "/notices/{notice_id}",
     status_code=HTTPStatus.NO_CONTENT,
     response_class=Response,
+    responses=_NOT_FOUND,
 )
 async def delete_notice(
     notice_id: ResourceId, session: SessionDep, query: Annotated[NoQuery, Query()]
@@ -137,6 +141,7 @@ async def delete_notice(
     "/notices/{notice_id}/translations/{language_code}",
     status_code=HTTPStatus.NO_CONTENT,
     response_class=Response,
+    responses={**_NOT_FOUND, 409: {"model": ErrorResponse}},
 )
 async def delete_notice_translation(
     notice_id: ResourceId,
