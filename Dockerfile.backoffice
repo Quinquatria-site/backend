@@ -1,0 +1,24 @@
+# Backoffice API 이미지. 빌드 컨텍스트는 저장소 루트다.
+#   docker build -f Dockerfile.backoffice -t quinquatria-backoffice .
+FROM python:3.14-slim
+
+# CI(.github/workflows/ci.yml)와 같은 uv 버전으로 고정한다.
+COPY --from=ghcr.io/astral-sh/uv:0.12.11 /uv /bin/uv
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never \
+    PATH="/app/.venv/bin:$PATH"
+
+WORKDIR /app
+COPY . .
+# 스키마는 Backoffice가 담당하므로 이 이미지만 alembic(migrate 그룹)을 함께 받는다.
+RUN uv sync --package backoffice --no-dev --group migrate --locked --no-editable \
+    && useradd --system --no-create-home app
+
+USER app
+EXPOSE 8000
+
+# 임시 배포용: 기동할 때마다 마이그레이션을 적용한다. 인스턴스를 1개로 둘 때만
+# 안전하며, 정식 배포에서는 배포 단계의 별도 작업으로 분리한다.
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn backoffice.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips '*'"]

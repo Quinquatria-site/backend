@@ -1,0 +1,23 @@
+# Customer API 이미지. 빌드 컨텍스트는 저장소 루트다.
+#   docker build -f Dockerfile.customer -t quinquatria-customer .
+FROM python:3.14-slim
+
+# CI(.github/workflows/ci.yml)와 같은 uv 버전으로 고정한다.
+COPY --from=ghcr.io/astral-sh/uv:0.12.11 /uv /bin/uv
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never \
+    PATH="/app/.venv/bin:$PATH"
+
+WORKDIR /app
+COPY . .
+RUN uv sync --package customer --no-dev --locked --no-editable \
+    && useradd --system --no-create-home app
+
+USER app
+EXPOSE 8000
+
+# 플랫폼 reverse proxy 뒤에서 원래 scheme·host를 따르도록 forwarded 헤더를 신뢰한다.
+CMD ["uvicorn", "customer.main:app", "--host", "0.0.0.0", "--port", "8000", \
+     "--proxy-headers", "--forwarded-allow-ips", "*"]

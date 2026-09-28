@@ -2,4 +2,9 @@
 
 from fastapi import APIRouter
 
+from backoffice.domains.catalog import categories, menus, places
+
 router = APIRouter(tags=["catalog"])
+router.include_router(categories.router)
+router.include_router(places.router)
+router.include_router(menus.router)
