@@ -40,7 +40,9 @@ async def list_performances(
     response_class=Response,
 )
 async def reorder_performances(
-    payload: ReorderRequest, session: SessionDep
+    payload: ReorderRequest,
+    query: Annotated[NoQuery, Query()],
+    session: SessionDep,
 ) -> Response:
     await service.reorder(session, payload.date, payload.order)
     return Response(status_code=HTTPStatus.NO_CONTENT)
@@ -49,6 +51,7 @@ async def reorder_performances(
 @router.post("/performances", status_code=HTTPStatus.CREATED)
 async def create_performance(
     payload: PerformanceCreate,
+    query: Annotated[NoQuery, Query()],
     session: SessionDep,
     store: ObjectStoreDep,
     settings: SettingsDep,
@@ -73,6 +76,7 @@ async def get_performance(
 async def update_performance(
     performance_id: ResourceId,
     payload: PerformancePatch,
+    query: Annotated[NoQuery, Query()],
     session: SessionDep,
     store: ObjectStoreDep,
     settings: SettingsDep,
@@ -89,7 +93,10 @@ async def update_performance(
 
 @router.put("/performances/{performance_id}/live")
 async def set_performance_live(
-    performance_id: ResourceId, payload: LiveUpdate, session: SessionDep
+    performance_id: ResourceId,
+    payload: LiveUpdate,
+    query: Annotated[NoQuery, Query()],
+    session: SessionDep,
 ) -> PerformanceOut:
     performance = await service.set_live(session, performance_id, payload.is_live)
     return await service.serialize_one(session, performance)
@@ -102,6 +109,7 @@ async def set_performance_live(
 )
 async def delete_performance(
     performance_id: ResourceId,
+    query: Annotated[NoQuery, Query()],
     session: SessionDep,
     store: ObjectStoreDep,
     settings: SettingsDep,
@@ -118,7 +126,10 @@ async def delete_performance(
     response_class=Response,
 )
 async def delete_performance_translation(
-    performance_id: ResourceId, language_code: LanguageCode, session: SessionDep
+    performance_id: ResourceId,
+    language_code: LanguageCode,
+    query: Annotated[NoQuery, Query()],
+    session: SessionDep,
 ) -> Response:
     await service.delete_translation(session, performance_id, language_code)
     return Response(status_code=HTTPStatus.NO_CONTENT)
