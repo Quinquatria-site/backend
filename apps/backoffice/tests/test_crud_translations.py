@@ -1,5 +1,7 @@
 """명세 §5.2의 번역 upsert와 언어별 삭제."""
 
+import asyncio
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -9,6 +11,9 @@ from backoffice.crud.translations import delete_translation, upsert_translations
 from common.errors import ApiError, ErrorCode
 from quinquatria_persistence.enums import LanguageCode, NoticeType
 from quinquatria_persistence.models import Notice, NoticeTranslation
+
+BLOCKED_FOR = 0.5
+"""뒤의 요청이 잠금에 막혀 있음을 확인하는 시간."""
 
 
 class _NoticeTranslation(TranslationIn):
@@ -115,3 +120,35 @@ async def test_delete_errors(database, owner_exists, code, expected) -> None:
         await _delete(database, notice_id, code)
 
     assert caught.value.code is expected
+
+
+async def test_delete_waits_for_a_patch_holding_the_owner(database) -> None:
+    """PATCH가 소유자를 `FOR UPDATE`로 잠그고 읽은 번역을 먼저 지우면
+    PATCH의 UPDATE가 0행에 맞아 `StaleDataError`(500)가 된다."""
+    notice_id = await _seed(database, LanguageCode.KO, LanguageCode.EN)
+
+    async with database.transaction() as patching:
+        notice = await patching.get(
+            Notice,
+            notice_id,
+            options=[selectinload(Notice.translations)],
+            with_for_update=True,
+        )
+        deleting = asyncio.create_task(_delete(database, notice_id, LanguageCode.EN))
+        await asyncio.sleep(BLOCKED_FOR)
+        assert not deleting.done()
+
+        upsert_translations(
+            notice.translations,
+            [
+                _NoticeTranslation(
+                    language_code=LanguageCode.EN, title="수정", content="본문"
+                )
+            ],
+            NoticeTranslation,
+        )
+
+    await deleting
+    assert [row.language_code for row in await _translations(database, notice_id)] == [
+        LanguageCode.KO
+    ]

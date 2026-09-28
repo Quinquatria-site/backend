@@ -48,8 +48,12 @@ async def delete_translation(
     owner_fk: InstrumentedAttribute[int],
     language_code: LanguageCode,
 ) -> None:
-    """기본 리소스 없음 → 404, KO → 409, 번역 없음 → 404 순서로 판정한다."""
-    await get_or_404(session, owner, owner_id)
+    """기본 리소스 없음 → 404, KO → 409, 번역 없음 → 404 순서로 판정한다.
+
+    소유자를 PATCH와 같이 `FOR UPDATE`로 잠근다. PATCH가 읽은 번역을 먼저 지우면
+    PATCH의 UPDATE가 0행에 맞아 `StaleDataError`(500)가 된다.
+    """
+    await get_or_404(session, owner, owner_id, for_update=True)
     if language_code is LanguageCode.KO:
         raise ApiError(
             ErrorCode.DELETE_CONFLICT,
