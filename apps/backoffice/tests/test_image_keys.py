@@ -91,6 +91,8 @@ def test_prefix_from_another_resource_is_rejected() -> None:
         "/images/place/leading-slash.webp",
         "images/place2/near-miss.webp",
         "",
+        "images/place/evil\x00.webp",
+        "images/place/evil\ud800.webp",
     ],
 )
 def test_crafted_keys_do_not_pass_as_place_images(key: str) -> None:
