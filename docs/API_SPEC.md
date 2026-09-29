@@ -1212,8 +1212,8 @@ Content-Type: application/json
 엔드포인트는 `is_live` 외의 필드를 받지 않으며 다른 필드를 보내면
 `422 VALIDATION_ERROR`다.
 
-commit이 성공하면 7.1의 자동 재검증 규칙에 따라 `PERFORMANCES` 대상
-ISR 재검증을 요청한다.
+공연 쓰기 API가 Backoffice에 병합되면, commit 성공 후 7.1의
+`performances` 태그 재검증을 연동한다.
 
 #### PUT `/api/v1/performances/reorder`
 
@@ -1272,8 +1272,8 @@ ISR 재검증을 요청한다.
 `422 VALIDATION_ERROR`다. 이 엔드포인트는 `date`와 `order` 외의 필드를
 받지 않으며 다른 필드를 보내면 `422 VALIDATION_ERROR`다.
 
-commit이 성공하면 7.1의 자동 재검증 규칙에 따라 `PERFORMANCES` 대상
-ISR 재검증을 요청한다.
+공연 쓰기 API가 Backoffice에 병합되면, commit 성공 후 7.1의
+`performances` 태그 재검증을 연동한다.
 
 ### 5.7 Notice 스키마
 
@@ -1412,23 +1412,45 @@ Category 삭제 충돌 예시:
 
 ### 7.1 자동 재검증
 
-Backoffice의 기본 리소스 `POST`, `PATCH`, `DELETE`, 번역 `DELETE`와
-현재 공연 중 상태를 바꾸는 `PUT /performances/{id}/live`, 일차 내 순서를
-바꾸는 `PUT /performances/reorder`가 DB transaction을 성공적으로 commit한
-뒤 해당 Customer 페이지의 ISR 재검증을 요청한다.
+Backoffice 쓰기 transaction이 성공적으로 commit되면 백그라운드에서
+프런트엔드 수신기로 재검증을 요청한다. 현재 연동 범위는 `develop`에 있는
+Category, Place, Menu의 기본 리소스 `POST`, `PATCH`, `DELETE`와 번역
+`DELETE` 경로 12개다. Performance, Notice, LostItem의 실제 쓰기 경로와
+재검증 훅은 해당 CRUD PR이 병합된 뒤 연동한다. 아래 표는 프런트엔드가
+지원하는 전체 태그 계약이며, 현재 모든 리소스의 쓰기 경로가 연동되었다는
+뜻은 아니다.
 
-| 변경 리소스           | 재검증 target  |
-| --------------------- | -------------- |
-| Category, Place, Menu | `PLACES`       |
-| Performance           | `PERFORMANCES` |
-| Notice                | `NOTICES`      |
-| LostItem              | `LOST_ITEMS`   |
+| 변경 리소스 | 프런트엔드 `tag` | 쓰기 경로 연동 |
+| --- | --- | --- |
+| Category | `categories` | 현재 범위 |
+| Place, Menu | `places` | 현재 범위 |
+| Performance | `performances` | 후속 범위 |
+| Notice (일반·상시) | `notices` | 후속 범위 |
+| LostItem (반환 상태 포함) | `lost-items` | 후속 범위 |
+
+수신기 계약은 `POST {USER_SITE_URL}/api/revalidate`다. Backoffice는 실행
+환경의 `REVALIDATE_SECRET`을 `Authorization: Bearer <secret>` 헤더에 넣고,
+다른 필드 없이 다음 JSON 본문을 보낸다.
+
+```json
+{"tag":"places"}
+```
+
+수신기의 `200`은 요청 성공, `400`은 잘못된 요청, `401`은 인증 실패다.
+`USER_SITE_URL` 또는 `REVALIDATE_SECRET`이 비어 있으면 전송을 건너뛴다.
+비어 있지 않은 잘못된 URL·설정은 앱 기동이나 CRUD 성공을 막지 않고 전송
+실패로 기록한다. 전송은 전체 요청 제한 10초, 한 번 시도, 재시도 및
+리다이렉트 없음으로 처리한다. 실패 로그에는 태그·실패 종류·HTTP 상태만
+남기고 비밀값, 원본 URL·헤더·본문·예외는 남기지 않는다.
 
 자동 재검증은 post-commit best-effort 작업이다. CRUD 성공 응답은 DB 반영
-성공을 의미하며 재검증 완료를 의미하지 않는다. 자동 요청 실패는
-운영 로그와 모니터링에 기록하고 운영자가 수동 재검증 API로 재시도한다.
+성공을 의미하며 프런트엔드 재생성 완료를 의미하지 않는다. 전송 실패는
+CRUD 응답을 바꾸지 않는다. 영속 큐나 재검증 상태 조회 API는 제공하지 않는다.
 
-### 7.2 수동 재검증
+### 7.2 수동 재검증 (후속 범위, 미구현)
+
+다음은 기존 수동 API 설계 초안이다. 이번 자동 webhook 구현에는 포함하지
+않으며, 구현 시 프런트엔드 태그 계약에 맞춰 별도로 재검토한다.
 
 #### POST `/api/v1/revalidations`
 
@@ -1446,7 +1468,7 @@ Bearer 인증이 필요하다.
 | -------- | ----------- | ---- | ------------------------------------------------- |
 | `target` | string enum | 예   | `PLACES`, `PERFORMANCES`, `NOTICES`, `LOST_ITEMS` |
 
-요청을 접수하면 `202 Accepted`를 반환한다.
+기존 설계에서는 요청을 접수하면 `202 Accepted`를 반환한다.
 
 ```json
 {
@@ -1455,10 +1477,9 @@ Bearer 인증이 필요하다.
 }
 ```
 
-`202`는 재검증 요청을 접수했다는 의미이며 프론트엔드 재생성 완료를
-보장하지 않는다. 요청 자체를 접수하지 못하면
-`500 INTERNAL_SERVER_ERROR`를 반환한다. ERD에 작업 상태 모델이 없으므로
-재검증 상태 조회 API는 제공하지 않는다.
+기존 설계의 `202`는 재검증 요청 접수를 뜻하며 프런트엔드 재생성 완료를
+보장하지 않는다. 기존 설계에서는 요청 자체를 접수하지 못하면
+`500 INTERNAL_SERVER_ERROR`를 반환한다. 이 경로는 아직 구현되지 않았다.
 
 ## 8. ERD와 API 매핑
 
@@ -1555,8 +1576,9 @@ ERD에는 구역 문자가 없으므로 API가 `A1`과 같은 구역 번호를 �
 24. Place 삭제 시 연결된 Menu와 모든 번역이 삭제된다.
 25. Place가 연결된 Category 삭제는 `409 DELETE_CONFLICT`이며 어떤 행도
     삭제되지 않는다.
-26. Backoffice 쓰기 transaction이 commit된 뒤 올바른 ISR target의
-    재검증이 요청된다.
+26. 현재 Backoffice에 구현된 Category, Place, Menu 쓰기 경로 12개는
+    transaction commit 뒤 각 `categories` 또는 `places` 태그로 자동
+    재검증을 요청한다. 다른 리소스의 쓰기 경로 훅은 후속 범위다.
 27. 공연 목록과 상세 응답에는 `start_at`과 `end_at`이 없고 `date`,
     `seq`, `is_live`가 포함된다.
 28. 공연 목록은 `date ASC, seq ASC, id ASC`로 정렬되며, `date` query를

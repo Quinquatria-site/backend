@@ -29,6 +29,7 @@ from backoffice.domains.catalog.schemas import (
     ensure_hours_ordered,
 )
 from backoffice.images.store import ObjectStore
+from backoffice.revalidation.events import RevalidationTag, mark_changed
 from common.errors import ApiError, ErrorCode, ErrorDetail
 from common.pagination import Page
 from common.query import NoQuery, PageQuery
@@ -161,7 +162,9 @@ async def create_place(
         max_bytes=settings.max_image_bytes,
     )
     session.add(place)
-    return await _respond(session, place)
+    result = await _respond(session, place)
+    mark_changed(session, RevalidationTag.PLACES)
+    return result
 
 
 @router.patch("/{place_id}")
@@ -193,7 +196,9 @@ async def update_place(
         setattr(place, name, value)
     if body.translations is not None:
         upsert_translations(place.translations, body.translations, PlaceTranslation)
-    return await _respond(session, place)
+    result = await _respond(session, place)
+    mark_changed(session, RevalidationTag.PLACES)
+    return result
 
 
 @router.delete("/{place_id}", status_code=HTTPStatus.NO_CONTENT)
@@ -213,6 +218,7 @@ async def delete_place(
     )
     await detach_images(session, [*_ordered_image_ids(place), *menu_image_ids])
     await session.execute(delete(Place).where(Place.id == place.id))
+    mark_changed(session, RevalidationTag.PLACES)
     return no_content()
 
 
@@ -233,6 +239,7 @@ async def delete_place_translation(
         owner_fk=PlaceTranslation.place_id,
         language_code=language_code,
     )
+    mark_changed(session, RevalidationTag.PLACES)
     return no_content()
 
 

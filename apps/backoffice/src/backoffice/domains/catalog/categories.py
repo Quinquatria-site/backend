@@ -21,6 +21,7 @@ from backoffice.domains.catalog.schemas import (
     CategoryTranslationOut,
     by_language,
 )
+from backoffice.revalidation.events import RevalidationTag, mark_changed
 from common.errors import ApiError, ErrorCode, ErrorDetail
 from common.pagination import Page
 from common.query import NoQuery, PageQuery
@@ -72,7 +73,9 @@ async def create_category(
         ],
     )
     session.add(category)
-    return await _respond(session, category)
+    result = await _respond(session, category)
+    mark_changed(session, RevalidationTag.CATEGORIES)
+    return result
 
 
 @router.patch("/{category_id}")
@@ -107,7 +110,9 @@ async def update_category(
         upsert_translations(
             category.translations, body.translations, CategoryTranslation
         )
-    return await _respond(session, category)
+    result = await _respond(session, category)
+    mark_changed(session, RevalidationTag.CATEGORIES)
+    return result
 
 
 @router.delete("/{category_id}", status_code=HTTPStatus.NO_CONTENT)
@@ -135,6 +140,7 @@ async def delete_category(
         )
     await detach_images(session, [category.image_id])
     await session.execute(delete(Category).where(Category.id == category.id))
+    mark_changed(session, RevalidationTag.CATEGORIES)
     return no_content()
 
 
@@ -155,6 +161,7 @@ async def delete_category_translation(
         owner_fk=CategoryTranslation.category_id,
         language_code=language_code,
     )
+    mark_changed(session, RevalidationTag.CATEGORIES)
     return no_content()
 
 
