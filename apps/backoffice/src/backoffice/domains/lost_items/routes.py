@@ -183,8 +183,12 @@ async def delete_lost_item(
     store: ObjectStoreDep,
     settings: SettingsDep,
 ) -> Response:
-    """번역은 FK `ON DELETE CASCADE`로, 이미지는 `DETACHED` 전이로 정리한다."""
-    item = await get_or_404(session, LostItem, lost_item_id)
+    """번역은 FK `ON DELETE CASCADE`로, 이미지는 `DETACHED` 전이로 정리한다.
+
+    PATCH와 같은 순서로 행을 먼저 잠근다. 잠그지 않으면 읽어 둔 `image_id`가
+    그사이 교체되어, 새 이미지가 참조 없이 `ATTACHED`로 남는다.
+    """
+    item = await get_or_404(session, LostItem, lost_item_id, for_update=True)
     await replace_image(
         session,
         store,
