@@ -1,9 +1,10 @@
 """라우트가 주입받는 인증 관련 의존성."""
 
+import logging
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import BackgroundTasks, Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +12,9 @@ from backoffice.auth.tokens import invalid_token_error, verify_token
 from backoffice.config import Settings, get_settings
 from backoffice.images.s3 import S3ObjectStore
 from backoffice.images.store import ObjectStore
+from backoffice.revalidation.events import pop_tags
+
+logger = logging.getLogger(__name__)
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
@@ -48,10 +52,26 @@ def get_object_store(settings: SettingsDep) -> ObjectStore:
 ObjectStoreDep = Annotated[ObjectStore, Depends(get_object_store)]
 
 
-async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
+async def get_session(
+    request: Request, background_tasks: BackgroundTasks
+) -> AsyncIterator[AsyncSession]:
     """요청 하나가 transaction 하나를 연다."""
     async with request.app.state.database.transaction() as session:
         yield session
+
+    # 위 context가 정상 종료된 뒤에만 이벤트를 꺼낸다. 이 시점에는 commit이
+    # 끝났고 응답 전송은 아직 시작되지 않았다. background 작업에 session을 넘기지 않는다.
+    for tag in pop_tags(session):
+        try:
+            sender = request.app.state.revalidation_sender
+            if sender.enabled:
+                background_tasks.add_task(sender.send_automatic, tag)
+        except Exception:
+            logger.warning(
+                "ISR revalidation registration failed "
+                "tag=%s kind=registration_error status=None",
+                tag.value,
+            )
 
 
 # `function` scope로 라우트 반환 직후 transaction을 끝낸다. 기본 `request`

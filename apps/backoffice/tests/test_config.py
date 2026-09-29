@@ -383,4 +383,9 @@ def test_static_aws_credentials_are_not_configurable() -> None:
     # 인스턴스의 `model_fields` 접근은 Pydantic V3에서 제거되므로 클래스에서 읽는다.
     fields = set(Settings.model_fields)
 
-    assert not {name for name in fields if "access_key" in name or "secret" in name}
+    # 프론트 웹훅 인증값은 AWS credential이 아니다. 그 한 필드만 제외한다.
+    assert not {
+        name
+        for name in fields
+        if name != "revalidate_secret" and ("access_key" in name or "secret" in name)
+    }

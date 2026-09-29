@@ -46,11 +46,15 @@
 | `BACKOFFICE_JWT_SIGNING_KEY` | 32 byte 이상 무작위 값 (`openssl rand -base64 48`) |
 | `BACKOFFICE_S3_BUCKET` | 업로드 버킷 이름 |
 | `BACKOFFICE_S3_REGION` | 버킷 리전 (예: `ap-northeast-2`) |
+| `USER_SITE_URL` | ISR 재검증 수신기가 있는 프런트엔드 기본 URL. 미설정 시 자동 요청 생략 |
+| `REVALIDATE_SECRET` | 프런트엔드 수신기와 공유하는 비밀값. 미설정 시 자동 요청 생략 |
 | `AWS_ACCESS_KEY_ID` | 아래 임시 IAM 사용자의 키 |
 | `AWS_SECRET_ACCESS_KEY` | 위 키의 secret |
 
 `BACKOFFICE_S3_ENDPOINT_URL`은 넣지 않습니다. 비밀값은 Cloudtype의 secret
 환경변수로 넣고, 발급 코드는 프론트 테스트 담당자에게만 따로 전달합니다.
+`REVALIDATE_SECRET`도 secret 환경변수로 주입하며, 이 문서나 저장소에 실제
+값을 기록하지 않습니다.
 
 ## 임시 배포 한정 예외: 정적 AWS 키
 

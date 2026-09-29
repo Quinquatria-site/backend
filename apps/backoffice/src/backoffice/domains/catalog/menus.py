@@ -26,6 +26,7 @@ from backoffice.domains.catalog.schemas import (
     MenuTranslationOut,
     by_language,
 )
+from backoffice.revalidation.events import RevalidationTag, mark_changed
 from common.errors import ApiError, ErrorCode
 from common.pagination import Page
 from common.query import NoQuery, PageQuery
@@ -104,7 +105,9 @@ async def create_menu(
         ],
     )
     session.add(menu)
-    return await _respond(session, menu)
+    result = await _respond(session, menu)
+    mark_changed(session, RevalidationTag.PLACES)
+    return result
 
 
 class MenuQuery(PageQuery):
@@ -165,7 +168,9 @@ async def update_menu(
         setattr(menu, name, value)
     if body.translations is not None:
         upsert_translations(menu.translations, body.translations, MenuTranslation)
-    return await _respond(session, menu)
+    result = await _respond(session, menu)
+    mark_changed(session, RevalidationTag.PLACES)
+    return result
 
 
 @router.delete("/{menu_id}", status_code=HTTPStatus.NO_CONTENT)
@@ -175,6 +180,7 @@ async def delete_menu(
     menu = await _lock_menu(session, menu_id)
     await detach_images(session, [menu.image_id])
     await session.execute(delete(Menu).where(Menu.id == menu.id))
+    mark_changed(session, RevalidationTag.PLACES)
     return no_content()
 
 
@@ -195,4 +201,5 @@ async def delete_menu_translation(
         owner_fk=MenuTranslation.menu_id,
         language_code=language_code,
     )
+    mark_changed(session, RevalidationTag.PLACES)
     return no_content()
