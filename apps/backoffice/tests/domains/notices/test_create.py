@@ -55,6 +55,9 @@ async def test_create_persists_notice_and_translations(
     [
         pytest.param({"type": "URGENT", "translations": [KO]}, id="unknown-type"),
         pytest.param({"type": "general", "translations": [KO]}, id="lowercase-type"),
+        pytest.param(
+            {"type": ["PERMANENT", "GENERAL"], "translations": [KO]}, id="array-type"
+        ),
         pytest.param({"translations": [KO]}, id="missing-type"),
         pytest.param({"type": "GENERAL"}, id="missing-translations"),
         pytest.param({"type": "GENERAL", "translations": []}, id="empty-translations"),

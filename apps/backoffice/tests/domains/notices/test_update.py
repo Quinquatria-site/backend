@@ -54,6 +54,7 @@ async def test_patch_upserts_only_sent_languages(api: AsyncClient) -> None:
         pytest.param({"type": None}, id="null-type"),
         pytest.param({"translations": None}, id="null-translations"),
         pytest.param({"type": "URGENT"}, id="unknown-type"),
+        pytest.param({"type": ["PERMANENT", "GENERAL"]}, id="array-type"),
         pytest.param({"created_at": "2026-10-05T13:00:00+09:00"}, id="created-at"),
         pytest.param(
             {"type": "GENERAL", "created_at": "2026-10-05T13:00:00+09:00"},
