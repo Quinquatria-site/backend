@@ -10,11 +10,12 @@ uv --directory apps/backoffice run fastapi dev
 
 ## ISR 자동 재검증
 
-카테고리·장소·메뉴의 생성, 수정, 삭제와 번역 삭제가 DB에 commit되면
-백그라운드에서 프런트엔드 `POST {USER_SITE_URL}/api/revalidate`를 호출합니다.
-`Authorization: Bearer <REVALIDATE_SECRET>` 헤더와 `{"tag":"categories"}`
-또는 `{"tag":"places"}` 본문을 사용합니다. 카테고리는 `categories`,
-장소와 메뉴는 `places` 태그입니다. 공연·공지·분실물 태그는 수신기 계약에
+카테고리·장소·메뉴·공지·공연의 생성, 수정, 삭제와 번역 삭제, 그리고 공연의
+순서 변경과 live 지정이 DB에 commit되면 백그라운드에서 프런트엔드
+`POST {USER_SITE_URL}/api/revalidate`를 호출합니다.
+`Authorization: Bearer <REVALIDATE_SECRET>` 헤더와 `{"tag":"categories"}` 같은
+본문을 사용합니다. 카테고리는 `categories`, 장소와 메뉴는 `places`, 공지는
+`notices`, 공연은 `performances` 태그입니다. 분실물 태그는 수신기 계약에
 포함되지만, 해당 Backoffice 쓰기 경로의 자동 훅은 후속 연동 범위입니다.
 
 `USER_SITE_URL`은 프런트엔드 사이트의 기본 URL이고 `REVALIDATE_SECRET`은
