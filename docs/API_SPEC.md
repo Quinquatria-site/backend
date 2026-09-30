@@ -1414,18 +1414,19 @@ Category 삭제 충돌 예시:
 
 Backoffice 쓰기 transaction이 성공적으로 commit되면 백그라운드에서
 프런트엔드 수신기로 재검증을 요청한다. 현재 연동 범위는 `develop`에 있는
-Category, Place, Menu의 기본 리소스 `POST`, `PATCH`, `DELETE`와 번역
-`DELETE` 경로 12개다. Performance, Notice, LostItem의 실제 쓰기 경로와
-재검증 훅은 해당 CRUD PR이 병합된 뒤 연동한다. 아래 표는 프런트엔드가
-지원하는 전체 태그 계약이며, 현재 모든 리소스의 쓰기 경로가 연동되었다는
-뜻은 아니다.
+Category, Place, Menu, Notice의 기본 리소스 `POST`, `PATCH`, `DELETE`와 번역
+`DELETE` 경로 16개, 그리고 Performance의 같은 경로 4개와 순서 변경
+`PUT /performances/reorder`, live 지정 `PUT /performances/{id}/live`까지
+22개다. LostItem의 실제 쓰기 경로와 재검증 훅은 해당 CRUD PR이 병합된 뒤
+연동한다. 아래 표는 프런트엔드가 지원하는 전체 태그 계약이며, 현재 모든
+리소스의 쓰기 경로가 연동되었다는 뜻은 아니다.
 
 | 변경 리소스 | 프런트엔드 `tag` | 쓰기 경로 연동 |
 | --- | --- | --- |
 | Category | `categories` | 현재 범위 |
 | Place, Menu | `places` | 현재 범위 |
-| Performance | `performances` | 후속 범위 |
-| Notice (일반·상시) | `notices` | 후속 범위 |
+| Performance | `performances` | 현재 범위 |
+| Notice (일반·상시) | `notices` | 현재 범위 |
 | LostItem (반환 상태 포함) | `lost-items` | 후속 범위 |
 
 수신기 계약은 `POST {USER_SITE_URL}/api/revalidate`다. Backoffice는 실행
@@ -1576,9 +1577,10 @@ ERD에는 구역 문자가 없으므로 API가 `A1`과 같은 구역 번호를 �
 24. Place 삭제 시 연결된 Menu와 모든 번역이 삭제된다.
 25. Place가 연결된 Category 삭제는 `409 DELETE_CONFLICT`이며 어떤 행도
     삭제되지 않는다.
-26. 현재 Backoffice에 구현된 Category, Place, Menu 쓰기 경로 12개는
-    transaction commit 뒤 각 `categories` 또는 `places` 태그로 자동
-    재검증을 요청한다. 다른 리소스의 쓰기 경로 훅은 후속 범위다.
+26. 현재 Backoffice에 구현된 Category, Place, Menu, Notice, Performance
+    쓰기 경로 22개는 transaction commit 뒤 각 `categories`, `places`,
+    `notices`, `performances` 태그로 자동 재검증을 요청한다. LostItem 쓰기
+    경로 훅은 후속 범위다.
 27. 공연 목록과 상세 응답에는 `start_at`과 `end_at`이 없고 `date`,
     `seq`, `is_live`가 포함된다.
 28. 공연 목록은 `date ASC, seq ASC, id ASC`로 정렬되며, `date` query를

@@ -18,6 +18,7 @@ from backoffice.domains.notices.schemas import (
     NoticePatch,
     NoticeTranslationOut,
 )
+from backoffice.revalidation.events import RevalidationTag, mark_changed
 from common.errors import ErrorResponse
 from common.pagination import Page
 from common.query import NoQuery
@@ -85,6 +86,7 @@ async def create_notice(
     session.add(notice)
     await session.flush()
     await session.refresh(notice, ["created_at"])
+    mark_changed(session, RevalidationTag.NOTICES)
     return _serialize(notice)
 
 
@@ -118,6 +120,7 @@ async def update_notice(
     if body.translations is not None:
         upsert_translations(notice.translations, body.translations, NoticeTranslation)
     await session.flush()
+    mark_changed(session, RevalidationTag.NOTICES)
     return _serialize(notice)
 
 
@@ -134,6 +137,7 @@ async def delete_notice(
     notice = await get_or_404(session, Notice, notice_id)
     await session.delete(notice)
     await session.flush()
+    mark_changed(session, RevalidationTag.NOTICES)
     return Response(status_code=HTTPStatus.NO_CONTENT)
 
 
@@ -157,4 +161,5 @@ async def delete_notice_translation(
         owner_fk=NoticeTranslation.notice_id,
         language_code=language_code,
     )
+    mark_changed(session, RevalidationTag.NOTICES)
     return Response(status_code=HTTPStatus.NO_CONTENT)
