@@ -95,7 +95,7 @@ ECR → 리포지토리 생성으로 두 개를 만듭니다.
 ## 3. 빈 서버 준비 (Ubuntu, 한 번만)
 
 ```bash
-# Docker와 Compose 플러그인
+# Docker와 Compose 플러그인. Compose는 2.30 이상이어야 한다(docker compose version).
 curl -fsSL https://get.docker.com | sudo sh
 
 # aws CLI
@@ -225,6 +225,13 @@ Settings → Environments → `production`을 만듭니다.
 `*_ENV` secret에는 `KEY=value` 형식의 줄을 그대로 붙여 넣습니다. 형식은
 [EC2 운영 배포](../DEPLOY_EC2.md)의 환경변수 절을 따르며, IAM role을 쓰므로
 `AWS_ACCESS_KEY_ID`와 `AWS_SECRET_ACCESS_KEY`는 넣지 않습니다.
+
+`compose.yaml`은 환경파일을 `format: raw`로 읽습니다. 값은 첫 `=` 뒤의 내용이
+그대로 컨테이너에 전달됩니다.
+
+- `$`, `#`, `=`가 들어간 값도 변수 치환 없이 그대로 전달됩니다.
+- **값을 따옴표로 감싸지 않습니다.** 따옴표도 값의 일부가 됩니다.
+- `#`로 시작하는 줄과 빈 줄은 무시됩니다.
 
 ## 동작
 

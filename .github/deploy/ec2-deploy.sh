@@ -20,6 +20,14 @@ if ! flock -w 900 9; then
     exit 1
 fi
 
+# compose.yaml의 env_file `format: raw`는 2.30부터 지원한다. 파일을 바꾸기 전에 확인한다.
+compose_version="$(docker compose version --short)"
+compose_version="${compose_version#v}"
+if [ "$(printf '%s\n' 2.30.0 "$compose_version" | sort -V | head -n 1)" != 2.30.0 ]; then
+    echo "Docker Compose $compose_version 은 지원하지 않습니다. 2.30 이상이 필요합니다" >&2
+    exit 1
+fi
+
 mkdir -p "$APP_DIR"
 cd "$APP_DIR"
 
