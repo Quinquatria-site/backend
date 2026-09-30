@@ -1,12 +1,17 @@
 name: Deploy
 
-# main의 CI가 성공한 커밋만 배포한다. 수동 실행은 선택한 브랜치의 최신 커밋을 배포한다.
+# main의 CI가 성공한 커밋을 배포한다. 수동 실행에 image_tag를 주면 그 커밋으로 롤백한다.
 on:
     workflow_run:
         workflows: [CI]
         types: [completed]
         branches: [main]
     workflow_dispatch:
+        inputs:
+            image_tag:
+                description: 배포할 커밋 SHA 40자. 비우면 main 최신 커밋
+                required: false
+                default: ''
 
 # 배포가 겹치면 컨테이너와 마이그레이션이 엉킨다. 진행 중인 배포는 취소하지 않는다.
 concurrency:
@@ -30,17 +35,55 @@ jobs:
         environment: production
         env:
             AWS_REGION: ap-northeast-2
-            DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+            IMAGE_TAG: ${{ inputs.image_tag || github.event.workflow_run.head_sha || github.sha }}
         steps:
+            - name: 배포 커밋 확인
+              run: |
+                  if ! [[ "$IMAGE_TAG" =~ ^[0-9a-f]{40}$ ]]; then
+                      echo "::error::image_tag는 커밋 SHA 40자여야 합니다: $IMAGE_TAG"
+                      exit 1
+                  fi
+
             - uses: actions/checkout@v7
               with:
-                  ref: ${{ env.DEPLOY_SHA }}
+                  ref: ${{ env.IMAGE_TAG }}
+                  fetch-depth: 0
+
+            # 롤백 입력으로 리뷰를 거치지 않은 브랜치의 커밋이 배포되지 않게 한다.
+            - name: main에 병합된 커밋인지 확인
+              run: |
+                  if ! git merge-base --is-ancestor "$IMAGE_TAG" origin/main; then
+                      echo "::error::$IMAGE_TAG 는 main 이력에 없는 커밋입니다"
+                      exit 1
+                  fi
 
             # 정적 키 없이 OIDC로 배포 role을 assume한다. 설정은 docs/deploy/github-actions-deploy.md.
             - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
               with:
                   role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
                   aws-region: ${{ env.AWS_REGION }}
+
+            - name: ECR 로그인
+              run: |
+                  account="$(aws sts get-caller-identity --query Account --output text)"
+                  registry="$account.dkr.ecr.$AWS_REGION.amazonaws.com"
+                  echo "IMAGE_REGISTRY=$registry" >> "$GITHUB_ENV"
+                  aws ecr get-login-password | docker login --username AWS --password-stdin "$registry"
+
+            # 태그는 불변이다. 같은 커밋의 이미지가 있으면 재빌드하지 않아 롤백이 빠르다.
+            - name: 이미지 빌드와 push
+              run: |
+                  for app in customer backoffice; do
+                      repo="quinquatria-$app"
+                      if aws ecr describe-images --repository-name "$repo" \
+                          --image-ids imageTag="$IMAGE_TAG" > /dev/null 2>&1; then
+                          echo "$repo:$IMAGE_TAG 이미 있음, 빌드 생략"
+                          continue
+                      fi
+                      image="$IMAGE_REGISTRY/$repo:$IMAGE_TAG"
+                      docker build -f "Dockerfile.$app" -t "$image" .
+                      docker push "$image"
+                  done
 
             # SSM 명령 본문은 실행 기록에 평문으로 남는다. 비밀값은 SecureString으로만 넘긴다.
             - name: 환경변수를 Parameter Store에 반영
@@ -63,23 +106,28 @@ jobs:
               env:
                   INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
               run: |
+                  compose="$(base64 -w0 .github/deploy/compose.yaml)"
                   script="$(base64 -w0 .github/deploy/ec2-deploy.sh)"
-                  params="$(jq -n --arg script "$script" --arg sha "$DEPLOY_SHA" --arg region "$AWS_REGION" '{
+                  params="$(jq -n \
+                      --arg compose "$compose" --arg script "$script" \
+                      --arg registry "$IMAGE_REGISTRY" --arg tag "$IMAGE_TAG" --arg region "$AWS_REGION" '{
                       commands: [
+                          "mkdir -p /opt/quinquatria",
+                          "echo \($compose) | base64 -d > /opt/quinquatria/compose.yaml",
                           "echo \($script) | base64 -d > /tmp/quinquatria-deploy.sh",
-                          "DEPLOY_SHA=\($sha) AWS_REGION=\($region) bash /tmp/quinquatria-deploy.sh"
+                          "IMAGE_REGISTRY=\($registry) IMAGE_TAG=\($tag) AWS_REGION=\($region) bash /tmp/quinquatria-deploy.sh"
                       ],
                       executionTimeout: ["1800"]
                   }')"
                   command_id="$(aws ssm send-command \
                       --instance-ids "$INSTANCE_ID" \
                       --document-name AWS-RunShellScript \
-                      --comment "deploy ${DEPLOY_SHA::12}" \
+                      --comment "deploy ${IMAGE_TAG::12}" \
                       --parameters "$params" \
                       --query Command.CommandId --output text)"
                   echo "SSM command: $command_id"
 
-                  # aws ssm wait는 100초에서 끝나므로 빌드를 기다릴 수 있게 직접 조회한다.
+                  # aws ssm wait는 100초에서 끝나므로 마이그레이션까지 기다릴 수 있게 직접 조회한다.
                   status=Pending
                   for _ in $(seq 1 180); do
                       sleep 10

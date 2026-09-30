@@ -1,0 +1,18 @@
+# 운영 EC2의 /opt/quinquatria/compose.yaml. deploy.yml이 배포마다 이 파일을 내려보낸다.
+# IMAGE_REGISTRY와 IMAGE_TAG는 같은 폴더의 .env에서 읽는다. 롤백은 IMAGE_TAG만 바꾼다.
+services:
+    customer:
+        image: ${IMAGE_REGISTRY:?}/quinquatria-customer:${IMAGE_TAG:?}
+        env_file: customer.env
+        ports: ['127.0.0.1:8001:8000']
+        restart: unless-stopped
+        logging: &logging
+            driver: json-file
+            options: { max-size: '20m', max-file: '5' }
+
+    backoffice:
+        image: ${IMAGE_REGISTRY:?}/quinquatria-backoffice:${IMAGE_TAG:?}
+        env_file: backoffice.env
+        ports: ['127.0.0.1:8002:8000']
+        restart: unless-stopped
+        logging: *logging

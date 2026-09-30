@@ -1,50 +1,122 @@
-# GitHub Actions 자동 배포 (SSM)
+# GitHub Actions 자동 배포 (ECR + SSM)
 
 `main`의 CI가 성공하면 [`deploy.yml`](../../.github/workflows/deploy.yml)이
-EC2에 배포합니다. EC2의 22번 포트와 정적 AWS 키 없이 동작합니다.
+이미지를 ECR에 올리고 EC2에서 교체합니다. 운영 서버는 빌드하지 않고, 22번
+포트와 정적 AWS 키 없이 동작합니다.
 
 ```
 main push ─▶ CI 성공 ─▶ Deploy (production 승인)
                           ├─ OIDC로 배포 role assume
+                          ├─ docker build → ECR push (태그 = 커밋 SHA, 있으면 생략)
                           ├─ CUSTOMER_ENV, BACKOFFICE_ENV → Parameter Store(SecureString)
-                          └─ SSM Run Command ─▶ EC2: .github/deploy/ec2-deploy.sh
+                          └─ SSM Run Command ─▶ EC2 /opt/quinquatria
+                                                 ├─ compose.yaml 갱신
                                                  ├─ Parameter Store → *.env
-                                                 ├─ git checkout <커밋>
-                                                 ├─ docker compose build / alembic / up -d
+                                                 ├─ docker compose pull
+                                                 ├─ alembic upgrade head
+                                                 ├─ docker compose up -d
                                                  └─ 127.0.0.1:8001, 8002 응답 확인
 ```
 
 비밀값은 SSM 명령 본문에 넣지 않습니다. 명령 본문은 SSM 실행 기록에 평문으로
 남기 때문에, 비밀값은 Parameter Store의 SecureString으로만 전달합니다.
 
-## 전제
+서버에 저장소를 clone하지 않습니다. [`compose.yaml`](../../.github/deploy/compose.yaml)은
+배포할 때마다 저장소의 파일로 덮어씁니다. 서버에서 직접 고친 내용은 다음 배포에서
+사라집니다.
 
-- EC2 서버 준비와 첫 수동 배포가 끝나 있어야 합니다. `/opt/quinquatria`에
-  `backend` 저장소와 `compose.yaml`이 있어야 합니다.
-- EC2에 aws CLI가 설치돼 있어야 합니다(`sudo snap install aws-cli --classic`).
-- **`main` 브랜치 보호 규칙**(PR 필수, CI 통과 필수, force push 금지)을 먼저
-  켭니다. 보호 규칙이 없으면 `main`에 들어간 모든 push가 운영에 배포됩니다.
+## 1. ECR 저장소
 
-## 1. EC2 인스턴스 role
+ECR → 리포지토리 생성으로 두 개를 만듭니다.
 
-기존 S3 정책에 다음 두 가지를 추가합니다.
+| 이름 | 태그 변경 불가 |
+| --- | --- |
+| `quinquatria-customer` | 활성화(Immutable) |
+| `quinquatria-backoffice` | 활성화(Immutable) |
 
-- AWS 관리형 정책 `AmazonSSMManagedInstanceCore`
-- 환경변수 파라미터 읽기
+태그는 커밋 SHA이므로 같은 태그를 덮어쓸 일이 없습니다. 불변으로 두면 롤백할
+때 받은 이미지가 그 커밋의 이미지임을 보장합니다.
+
+각 저장소에 수명 주기 정책을 두어 오래된 이미지를 지웁니다.
 
 ```json
 {
-  "Effect": "Allow",
-  "Action": "ssm:GetParameter",
-  "Resource": "arn:aws:ssm:ap-northeast-2:<account-id>:parameter/quinquatria/*"
+  "rules": [
+    {
+      "rulePriority": 1,
+      "description": "최근 30개만 보관",
+      "selection": {
+        "tagStatus": "any",
+        "countType": "imageCountMoreThan",
+        "countNumber": 30
+      },
+      "action": { "type": "expire" }
+    }
+  ]
 }
 ```
 
-기본 키(`aws/ssm`)로 암호화하면 KMS 권한은 따로 필요하지 않습니다. Ubuntu
-AMI에는 SSM Agent가 기본 설치돼 있습니다. Systems Manager → Fleet Manager에서
-인스턴스가 "온라인"으로 보이면 준비된 것입니다.
+## 2. EC2 인스턴스 role
 
-## 2. GitHub OIDC 공급자
+기존 S3 정책에 다음을 추가합니다.
+
+- AWS 관리형 정책 `AmazonSSMManagedInstanceCore`
+- 환경변수 파라미터 읽기와 ECR pull
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadEnvParameters",
+      "Effect": "Allow",
+      "Action": "ssm:GetParameter",
+      "Resource": "arn:aws:ssm:ap-northeast-2:<account-id>:parameter/quinquatria/*"
+    },
+    {
+      "Sid": "EcrLogin",
+      "Effect": "Allow",
+      "Action": "ecr:GetAuthorizationToken",
+      "Resource": "*"
+    },
+    {
+      "Sid": "PullImages",
+      "Effect": "Allow",
+      "Action": ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"],
+      "Resource": "arn:aws:ecr:ap-northeast-2:<account-id>:repository/quinquatria-*"
+    }
+  ]
+}
+```
+
+기본 키(`aws/ssm`)로 암호화하면 KMS 권한은 따로 필요하지 않습니다.
+`GetAuthorizationToken`은 리소스 단위 제한을 지원하지 않아 `*`를 씁니다.
+
+## 3. 빈 서버 준비 (Ubuntu, 한 번만)
+
+```bash
+# Docker와 Compose 플러그인
+curl -fsSL https://get.docker.com | sudo sh
+
+# aws CLI
+sudo snap install aws-cli --classic
+
+# SSM Agent는 Ubuntu AMI에 기본 설치돼 있다. 동작 확인:
+sudo snap services amazon-ssm-agent
+```
+
+컨테이너가 인스턴스 role을 쓸 수 있게 IMDS hop limit을 2로 올립니다.
+
+```bash
+aws ec2 modify-instance-metadata-options --instance-id <instance-id> \
+  --http-tokens required --http-put-response-hop-limit 2
+```
+
+Systems Manager → Fleet Manager에서 인스턴스가 "온라인"이면 준비된 것입니다.
+nginx와 TLS 설정은 [EC2 운영 배포](../DEPLOY_EC2.md)를 따릅니다. `/opt/quinquatria`와
+그 안의 파일은 첫 배포가 만듭니다.
+
+## 4. GitHub OIDC 공급자
 
 IAM → 자격 증명 공급자 → 공급자 추가:
 
@@ -54,7 +126,7 @@ IAM → 자격 증명 공급자 → 공급자 추가:
 | 공급자 URL | `https://token.actions.githubusercontent.com` |
 | 대상 | `sts.amazonaws.com` |
 
-## 3. 배포 role
+## 5. 배포 role
 
 IAM → 역할 생성 → 웹 자격 증명 → 위 공급자를 선택합니다. 신뢰 정책은 이
 저장소의 `production` Environment에서 실행된 job만 허용합니다.
@@ -87,6 +159,25 @@ IAM → 역할 생성 → 웹 자격 증명 → 위 공급자를 선택합니다
   "Version": "2012-10-17",
   "Statement": [
     {
+      "Sid": "EcrLogin",
+      "Effect": "Allow",
+      "Action": "ecr:GetAuthorizationToken",
+      "Resource": "*"
+    },
+    {
+      "Sid": "PushImages",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:DescribeImages",
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:InitiateLayerUpload",
+        "ecr:UploadLayerPart",
+        "ecr:CompleteLayerUpload",
+        "ecr:PutImage"
+      ],
+      "Resource": "arn:aws:ecr:ap-northeast-2:<account-id>:repository/quinquatria-*"
+    },
+    {
       "Sid": "WriteEnvParameters",
       "Effect": "Allow",
       "Action": "ssm:PutParameter",
@@ -111,9 +202,10 @@ IAM → 역할 생성 → 웹 자격 증명 → 위 공급자를 선택합니다
 }
 ```
 
-`GetCommandInvocation`은 리소스 단위 제한을 지원하지 않아 `*`를 씁니다.
+## 6. GitHub 설정
 
-## 4. GitHub Environment
+먼저 **`main` 브랜치 보호 규칙**(PR 필수, CI 통과 필수, force push 금지)을
+켭니다. 보호 규칙이 없으면 `main`에 들어간 모든 push가 운영에 배포됩니다.
 
 Settings → Environments → `production`을 만듭니다.
 
@@ -123,28 +215,38 @@ Settings → Environments → `production`을 만듭니다.
 | Deployment branches | - | `main`만 허용 |
 | Secret | `CUSTOMER_ENV` | `customer.env` 파일 내용 전체 |
 | Secret | `BACKOFFICE_ENV` | `backoffice.env` 파일 내용 전체 |
-| Variable | `AWS_DEPLOY_ROLE_ARN` | 3의 배포 role ARN |
+| Variable | `AWS_DEPLOY_ROLE_ARN` | 5의 배포 role ARN |
 | Variable | `EC2_INSTANCE_ID` | `i-...` |
 
 `*_ENV` secret에는 `KEY=value` 형식의 줄을 그대로 붙여 넣습니다. 형식은
-[EC2 운영 배포](../DEPLOY_EC2.md)의 환경변수 절을 따릅니다. 값을 바꾸면 다음
-배포부터 반영됩니다. 바로 반영하려면 Actions → Deploy → Run workflow를
-실행합니다.
+[EC2 운영 배포](../DEPLOY_EC2.md)의 환경변수 절을 따르며, IAM role을 쓰므로
+`AWS_ACCESS_KEY_ID`와 `AWS_SECRET_ACCESS_KEY`는 넣지 않습니다.
 
 ## 동작
 
 - `workflow_run`은 기본 브랜치(`main`)에 있는 workflow 파일만 실행합니다. 이
-  파일이 `main`에 들어간 다음 push부터 자동 배포가 시작됩니다.
-- 배포는 한 번에 하나씩만 실행합니다. 배포가 진행 중일 때 들어온 다음 배포는
-  앞의 배포가 끝날 때까지 기다립니다.
-- 서버 스크립트는 `main` 브랜치를 배포 커밋으로 맞춘 뒤(`checkout -B main`)
-  빌드합니다. 서버의 저장소에서 파일을 직접 고쳐 두면 checkout이 실패하고
-  배포가 중단됩니다.
+  파일이 `main`에 들어간 다음 push부터 자동 배포가 시작됩니다. 첫 배포는
+  Actions → Deploy → Run workflow로 실행합니다.
+- 배포는 한 번에 하나씩만 실행하고, 진행 중인 배포는 취소하지 않습니다.
+- secret 값을 바꾸면 다음 배포부터 반영됩니다. 바로 반영하려면 Run workflow를
+  실행합니다. 같은 커밋이면 이미지를 다시 빌드하지 않습니다.
 - 실행 결과는 Actions 로그의 stdout, stderr 그룹과 Systems Manager →
   Run Command 기록에서 볼 수 있습니다. 출력은 최대 24,000자까지만 남습니다.
 
 ## 롤백
 
-Actions → Deploy → Run workflow에서 브랜치 대신 이전 커밋을 배포할 수는
-없습니다. 되돌릴 때는 `main`에 revert PR을 병합합니다. 마이그레이션은 자동으로
-되돌리지 않습니다.
+Actions → Deploy → Run workflow에서 `image_tag`에 되돌릴 커밋의 SHA 40자를
+넣습니다. `main` 이력에 있는 커밋만 받으며, 그 커밋의 이미지가 ECR에 있으면
+빌드 없이 교체합니다.
+
+서버에서 직접 되돌려야 할 때는 `/opt/quinquatria/.env.previous`에 직전 태그가
+있습니다.
+
+```bash
+cd /opt/quinquatria
+sudo sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=<이전 SHA>/" .env
+sudo docker compose up -d
+```
+
+마이그레이션은 자동으로 되돌리지 않습니다. 스키마가 바뀐 배포를 되돌릴 때는
+`alembic downgrade <revision>`이 안전한지 먼저 확인합니다.

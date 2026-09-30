@@ -3,14 +3,14 @@
 # 출력이 SSM 실행 기록과 Actions 로그에 남으므로 set -x와 비밀값 출력을 쓰지 않는다.
 set -euo pipefail
 
-: "${DEPLOY_SHA:?DEPLOY_SHA가 필요합니다}"
+: "${IMAGE_REGISTRY:?IMAGE_REGISTRY가 필요합니다}"
+: "${IMAGE_TAG:?IMAGE_TAG가 필요합니다}"
 REGION="${AWS_REGION:-ap-northeast-2}"
 APP_DIR=/opt/quinquatria
 # SSM 셸의 PATH에는 snap으로 설치한 aws CLI가 없을 수 있다.
 export PATH="$PATH:/snap/bin:/usr/local/bin"
 
 cd "$APP_DIR"
-owner="$(stat -c %U "$APP_DIR")"
 
 tmp=""
 cleanup() { if [ -n "$tmp" ]; then rm -f "$tmp"; fi; }
@@ -20,18 +20,20 @@ for app in customer backoffice; do
     aws ssm get-parameter --region "$REGION" --name "/quinquatria/$app.env" \
         --with-decryption --query Parameter.Value --output text > "$tmp"
     chmod 600 "$tmp"
-    chown "$owner:" "$tmp"
     mv "$tmp" "$app.env"
     tmp=""
 done
 echo "환경변수 파일 갱신 완료"
 
-# 저장소 소유자로 git을 실행해야 수동으로 pull할 때 권한이 꼬이지 않는다.
-sudo -u "$owner" git -C backend fetch --quiet origin main
-sudo -u "$owner" git -C backend checkout --quiet -B main "$DEPLOY_SHA"
-echo "코드: $(sudo -u "$owner" git -C backend log -1 --format='%h %s')"
+# compose.yaml이 변수 치환에 쓰는 값. 직전 태그를 남겨 수동 롤백에 쓴다.
+if [ -f .env ]; then
+    grep '^IMAGE_TAG=' .env | sed 's/^/PREVIOUS_/' > .env.previous || true
+fi
+printf 'IMAGE_REGISTRY=%s\nIMAGE_TAG=%s\n' "$IMAGE_REGISTRY" "$IMAGE_TAG" > .env
 
-docker compose build --quiet
+aws ecr get-login-password --region "$REGION" \
+    | docker login --username AWS --password-stdin "$IMAGE_REGISTRY" > /dev/null
+docker compose pull --quiet
 docker compose run --rm backoffice alembic upgrade head
 docker compose up -d --remove-orphans
 
@@ -50,6 +52,6 @@ for port in 8001 8002; do
     done
 done
 
-# 재빌드로 이름을 잃은 이전 이미지가 디스크를 채우지 않게 한다.
-docker image prune -f > /dev/null
-echo "배포 완료: $DEPLOY_SHA"
+# 실행 중이 아니고 만든 지 사흘이 지난 이미지만 지운다. 최근 이미지는 롤백용으로 남긴다.
+docker image prune -af --filter 'until=72h' > /dev/null
+echo "배포 완료: $IMAGE_TAG"
