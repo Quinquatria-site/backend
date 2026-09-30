@@ -83,9 +83,16 @@ jobs:
             AWS_REGION: ap-northeast-2
             IMAGE_TAG: ${{ needs.target.outputs.image_tag }}
         steps:
+            # 배포 보조 파일(.github/deploy)은 실행 중인 workflow의 revision에서 읽는다.
+            # 앱 소스만 배포할 커밋으로 app/에 받아, 배포 파일이 없던 과거 커밋도 롤백할 수 있게 한다.
+            - uses: actions/checkout@v7
+              with:
+                  ref: ${{ github.workflow_sha }}
+
             - uses: actions/checkout@v7
               with:
                   ref: ${{ env.IMAGE_TAG }}
+                  path: app
 
             # 승인을 기다리는 사이 main이 앞서 나갔으면 뒤이은 실행이 배포하도록 넘긴다.
             - name: 자동 배포 대상이 여전히 최신인지 확인
@@ -121,7 +128,7 @@ jobs:
                           continue
                       fi
                       image="$IMAGE_REGISTRY/$repo:$IMAGE_TAG"
-                      docker build -f "Dockerfile.$app" -t "$image" .
+                      docker build -f "app/Dockerfile.$app" -t "$image" app
                       docker push "$image"
                   done
 
@@ -201,7 +208,10 @@ jobs:
 
                   if ! wait_until_done $(( DELIVERY_TIMEOUT + EXECUTION_TIMEOUT + 120 )); then
                       echo "::warning::상태 조회 한도를 넘어 원격 명령($status)을 취소합니다"
-                      aws ssm cancel-command --command-id "$command_id" --instance-ids "$INSTANCE_ID"
+                      # 취소 요청이 실패해도(막 끝난 명령 등) 종료 확인은 이어서 한다.
+                      if ! aws ssm cancel-command --command-id "$command_id" --instance-ids "$INSTANCE_ID"; then
+                          echo "::warning::취소 요청이 실패했습니다. 종료 여부를 계속 확인합니다"
+                      fi
                       if ! wait_until_done 300; then
                           echo "::error::원격 명령의 종료를 확인하지 못했습니다($status). 서버의 배포 잠금이 다음 배포와의 중첩을 막습니다"
                           exit 1

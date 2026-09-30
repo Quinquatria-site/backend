@@ -193,14 +193,18 @@ IAM → 역할 생성 → 웹 자격 증명 → 위 공급자를 선택합니다
       ]
     },
     {
-      "Sid": "ReadCommandResult",
+      "Sid": "ManageDeployCommand",
       "Effect": "Allow",
-      "Action": "ssm:GetCommandInvocation",
+      "Action": ["ssm:GetCommandInvocation", "ssm:CancelCommand"],
       "Resource": "*"
     }
   ]
 }
 ```
+
+`GetCommandInvocation`과 `CancelCommand`는 명령 단위로 리소스를 제한할 수 없어
+`*`를 씁니다. `CancelCommand`는 상태 조회 한도를 넘었을 때 원격 명령을 취소하는 데
+필요합니다.
 
 ## 6. GitHub 설정
 
@@ -248,7 +252,9 @@ Settings → Environments → `production`을 만듭니다.
 
 Actions → Deploy → Run workflow에서 `image_tag`에 되돌릴 커밋의 SHA 40자를
 넣습니다. `main` 이력에 있는 커밋만 받으며, 그 커밋의 이미지가 ECR에 있으면
-빌드 없이 교체합니다.
+빌드 없이 교체합니다. 앱 소스만 그 커밋에서 빌드하고 `compose.yaml`과 배포
+스크립트는 실행 중인 workflow의 것을 쓰므로, 배포 파일이 생기기 전의 커밋으로도
+되돌릴 수 있습니다.
 
 서버에서 직접 되돌려야 할 때는 `/opt/quinquatria/.env.previous`에 직전 태그가
 있습니다.
