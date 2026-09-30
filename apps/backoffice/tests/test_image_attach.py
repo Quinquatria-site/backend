@@ -260,6 +260,29 @@ async def test_duplicate_keys_in_one_array_are_rejected(database, store) -> None
     assert error.value.code is ErrorCode.INVALID_IMAGE
 
 
+@pytest.mark.parametrize(
+    "bad_key", ["images/place/evil\x00.webp", "images/place/evil\ud800.webp"]
+)
+async def test_unbindable_key_is_rejected_before_querying(
+    database, store, bad_key: str
+) -> None:
+    """NUL이나 짝 없는 서로게이트가 SQL 바인딩까지 가면 500이 된다."""
+    await _seed(database, _image())
+
+    async with database.transaction() as session:
+        with pytest.raises(ApiError) as error:
+            await attach_many(
+                session,
+                store,
+                object_keys=[KEY, bad_key],
+                resource_type=ImageResourceType.PLACE_IMAGE,
+                current_image_ids=(),
+                max_bytes=MAX_BYTES,
+            )
+
+    assert error.value.code is ErrorCode.INVALID_IMAGE
+
+
 async def test_empty_array_is_a_validation_error(database, store) -> None:
     """명세 §4.6: 이미지가 없는 장소는 빈 배열이 아니라 null이다."""
     async with database.transaction() as session:

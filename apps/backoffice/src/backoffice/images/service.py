@@ -166,6 +166,9 @@ async def attach_many(
         raise ApiError(ErrorCode.VALIDATION_ERROR)
     if len(set(object_keys)) != len(object_keys):
         raise _invalid()
+    # 아래 조회가 attach의 prefix 검사보다 먼저 key를 바인딩한다.
+    if not all(matches_prefix(key, resource_type) for key in object_keys):
+        raise _invalid()
 
     owned = set(current_image_ids)
     attached = []

@@ -11,6 +11,7 @@ dependencies = [
     "aioboto3>=15.5,<16",
     "common",
     "fastapi[standard]>=0.141.1",
+    "httpx>=0.28.1,<1",
     "pydantic-settings>=2.7,<3",
     "pyjwt>=2.10,<3",
     "quinquatria-persistence",
@@ -26,3 +27,8 @@ entrypoint = "backoffice.main:app"
 [build-system]
 requires = ["uv_build>=0.12.11,<0.13.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+migrate = [
+    "alembic>=1.17,<2",
+]

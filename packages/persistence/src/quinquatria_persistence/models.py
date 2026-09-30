@@ -6,10 +6,12 @@ foreign keys enforce deletion behavior even when a write bypasses the ORM.
 
 from __future__ import annotations
 
+from datetime import date as DateValue
 from datetime import datetime
 
 from sqlalchemy import (
     CheckConstraint,
+    Date,
     DateTime,
     Double,
     ForeignKey,
@@ -18,6 +20,7 @@ from sqlalchemy import (
     Integer,
     Text,
     UniqueConstraint,
+    false,
     func,
     text,
 )
@@ -160,6 +163,9 @@ class Place(_IdentityMixin, Base):
         CheckConstraint("id > 0", name="id_positive"),
         CheckConstraint("category_sequence >= 1", name="category_sequence_positive"),
         CheckConstraint("end_hour >= start_hour", name="hours_ordered"),
+        # 구역 번호(A1 …)가 두 장소에 붙지 않게 한다. 요청 하나가 한 행만 바꾸므로
+        # `place_image`와 달리 지연하지 않는다 (명세 §5.4, §8).
+        UniqueConstraint("category_id", "category_sequence"),
         Index(None, "category_id", "category_sequence", "id"),
     )
 
@@ -277,20 +283,28 @@ class MenuTranslation(_IdentityMixin, Base):
 
 
 class Performance(_IdentityMixin, Base):
+    """축제 일차(`date`)와 그 안의 노출 순서(`seq`)로 배치되는 공연.
+
+    `(date, seq)` unique는 deferrable이다. 재정렬이 한 transaction 안에서
+    여러 행의 `seq`를 맞바꾸는 중간 상태를 허용해야 한다 (명세 §5.6).
+    """
+
     __tablename__ = "performance"
     __table_args__ = (
         CheckConstraint("id > 0", name="id_positive"),
-        CheckConstraint("end_at >= start_at", name="times_ordered"),
-        Index(None, "start_at", "id"),
-        Index(None, "type", "start_at", "id"),
+        CheckConstraint("seq >= 1", name="seq_positive"),
+        UniqueConstraint("date", "seq", deferrable=True, initially="DEFERRED"),
+        Index(None, "date", "seq", "id"),
+        Index(None, "type", "date", "seq", "id"),
     )
 
     type: Mapped[PerformanceType] = mapped_column(_performance_type)
     image_id: Mapped[int | None] = mapped_column(
         ForeignKey("image.id"), nullable=True, unique=True
     )
-    start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    date: Mapped[DateValue] = mapped_column(Date)
+    seq: Mapped[int] = mapped_column(Integer)
+    is_live: Mapped[bool] = mapped_column(server_default=false())
 
     translations: Mapped[list[PerformanceTranslation]] = relationship(
         back_populates="performance",

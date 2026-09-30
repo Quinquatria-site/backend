@@ -35,10 +35,12 @@ def matches_prefix(object_key: str, resource_type: ImageResourceType) -> bool:
     """key가 그 용도의 prefix 바로 아래에 있는지 본다.
 
     `startswith`만으로는 `images/place/../menu/x`처럼 상위로 빠져나가는 key가
-    통과하므로, 남은 부분에 구분자가 더 없는지도 확인한다.
+    통과하므로, 남은 부분에 구분자가 더 없는지도 확인한다. NUL이나 짝 없는
+    서로게이트 같은 비출력 문자는 DB 조회 파라미터로 바인딩할 수 없어 500이
+    되므로 여기서 거절한다. 서버가 만든 key에는 이런 문자가 없다.
     """
     prefix = PREFIXES[resource_type]
     if not object_key.startswith(prefix):
         return False
     name = object_key[len(prefix) :]
-    return bool(name) and "/" not in name and ".." not in name
+    return bool(name) and "/" not in name and ".." not in name and name.isprintable()

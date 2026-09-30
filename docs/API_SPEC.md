@@ -4,7 +4,7 @@
 | ----------------- | ---------------------------- |
 | 문서 버전         | v0.3                         |
 | 작성일            | 2026-09-09                   |
-| 최종 수정일       | 2026-09-14                   |
+| 최종 수정일       | 2026-09-23                   |
 | 기준 문서         | [PRD](./PRD.md)              |
 | 대상 애플리케이션 | Customer API, Backoffice API |
 | API 버전          | v1                           |
@@ -85,6 +85,15 @@ Customer API와 Backoffice API는 별도 FastAPI 애플리케이션으로 배포
 - 번역의 `description`과 `found_location`은 선택이며 생략하면 빈
   문자열로 저장한다. 응답에는 항상 문자열로 포함하며 `null`이 아니다.
   나머지 번역 필드는 필수다.
+- 번역 텍스트 필드는 앞뒤 공백을 제거한 값으로 저장한다. 필수 필드는
+  제거 후 1자 이상이어야 하며, 빈 문자열이나 공백만 보내면
+  `422 VALIDATION_ERROR`다.
+- 본문형 필드(`description`, `content`)는 줄바꿈(`\n`, `\r`)과 탭을
+  허용한다. 한 줄 필드(`name`, `title`, `host_college`,
+  `found_location`)는 줄바꿈을 포함해 제어 문자를 허용하지 않는다.
+- 그 외 제어 문자(NUL 포함)와 짝이 없는 UTF-16 서로게이트(`\ud83d` 단독
+  등)는 모든 번역 필드에서 `422 VALIDATION_ERROR`다. 이모지는 ZWJ 조합과
+  변형 선택자를 포함해 모든 번역 필드에서 허용한다.
 - 응답 본문이 없는 `204 No Content`에는 Content-Type과 JSON 본문을
   포함하지 않는다.
 
@@ -983,7 +992,7 @@ Content-Type: application/json
 | ------------------- | ------------------ | ------------- | ------------------- | ------------------------------------------ |
 | `id`                | integer            | 서버 생성     | 수정 불가           | 장소 ID                                    |
 | `category_id`       | integer            | 필수          | 선택                | 존재하는 카테고리 ID                       |
-| `category_sequence` | integer            | 필수          | 선택                | 1 이상의 카테고리 내 순서                  |
+| `category_sequence` | integer            | 필수          | 선택                | 1 이상, 카테고리 내에서 유일한 순서        |
 | `x`                 | number             | 필수          | 선택                | 지도 x 좌표                                |
 | `y`                 | number             | 필수          | 선택                | 지도 y 좌표                                |
 | `start_hour`        | datetime string    | 필수          | 선택                | 운영 시작 시각                             |
@@ -995,6 +1004,20 @@ Content-Type: application/json
 같은 것은 허용한다. 존재하지 않는 `category_id`는
 `404 RESOURCE_NOT_FOUND`다. `category_sequence`가 1 미만이면
 `422 VALIDATION_ERROR`다.
+
+`category_sequence`는 지도에 표기하는 구역+번호(A1, A2 …)의 번호이므로
+같은 카테고리 안에서 유일하다.
+
+- 판정 대상은 요청 반영 후의 `(category_id, category_sequence)` 쌍이다.
+  `PATCH`로 둘 중 하나만 보내면 저장된 나머지 값과 합쳐 판정한다.
+- 다른 장소가 이미 쓰는 쌍이면 `422 VALIDATION_ERROR`다. `details`의
+  `field`는 `category_sequence`다.
+- 카테고리가 다르면 같은 번호를 쓸 수 있다.
+- 장소가 현재 가진 값을 변경 없이 다시 보내는 것은 허용한다.
+- 번호의 연속성은 요구하지 않는다. `1`, `3`, `7`처럼 빈 번호가 있어도 된다.
+  장소를 삭제해도 남은 장소의 번호를 다시 매기지 않는다.
+- 서버가 번호를 정하거나 재정렬하지 않는다. 두 장소의 번호를 맞바꾸려면
+  한 장소를 쓰이지 않는 번호로 먼저 옮긴 뒤 차례로 `PATCH`한다.
 
 `place_image_uri`는 이미지가 없음을 `null`로 표현한다. 배열을 보낼
 때는 다음을 지킨다. 위반은 `422 VALIDATION_ERROR`다.
@@ -1189,8 +1212,8 @@ Content-Type: application/json
 엔드포인트는 `is_live` 외의 필드를 받지 않으며 다른 필드를 보내면
 `422 VALIDATION_ERROR`다.
 
-commit이 성공하면 7.1의 자동 재검증 규칙에 따라 `PERFORMANCES` 대상
-ISR 재검증을 요청한다.
+공연 쓰기 API가 Backoffice에 병합되면, commit 성공 후 7.1의
+`performances` 태그 재검증을 연동한다.
 
 #### PUT `/api/v1/performances/reorder`
 
@@ -1249,8 +1272,8 @@ ISR 재검증을 요청한다.
 `422 VALIDATION_ERROR`다. 이 엔드포인트는 `date`와 `order` 외의 필드를
 받지 않으며 다른 필드를 보내면 `422 VALIDATION_ERROR`다.
 
-commit이 성공하면 7.1의 자동 재검증 규칙에 따라 `PERFORMANCES` 대상
-ISR 재검증을 요청한다.
+공연 쓰기 API가 Backoffice에 병합되면, commit 성공 후 7.1의
+`performances` 태그 재검증을 연동한다.
 
 ### 5.7 Notice 스키마
 
@@ -1389,23 +1412,46 @@ Category 삭제 충돌 예시:
 
 ### 7.1 자동 재검증
 
-Backoffice의 기본 리소스 `POST`, `PATCH`, `DELETE`, 번역 `DELETE`와
-현재 공연 중 상태를 바꾸는 `PUT /performances/{id}/live`, 일차 내 순서를
-바꾸는 `PUT /performances/reorder`가 DB transaction을 성공적으로 commit한
-뒤 해당 Customer 페이지의 ISR 재검증을 요청한다.
+Backoffice 쓰기 transaction이 성공적으로 commit되면 백그라운드에서
+프런트엔드 수신기로 재검증을 요청한다. 현재 연동 범위는 `develop`에 있는
+Category, Place, Menu, Notice의 기본 리소스 `POST`, `PATCH`, `DELETE`와 번역
+`DELETE` 경로 16개, 그리고 Performance의 같은 경로 4개와 순서 변경
+`PUT /performances/reorder`, live 지정 `PUT /performances/{id}/live`까지
+22개다. LostItem의 실제 쓰기 경로와 재검증 훅은 해당 CRUD PR이 병합된 뒤
+연동한다. 아래 표는 프런트엔드가 지원하는 전체 태그 계약이며, 현재 모든
+리소스의 쓰기 경로가 연동되었다는 뜻은 아니다.
 
-| 변경 리소스           | 재검증 target  |
-| --------------------- | -------------- |
-| Category, Place, Menu | `PLACES`       |
-| Performance           | `PERFORMANCES` |
-| Notice                | `NOTICES`      |
-| LostItem              | `LOST_ITEMS`   |
+| 변경 리소스 | 프런트엔드 `tag` | 쓰기 경로 연동 |
+| --- | --- | --- |
+| Category | `categories` | 현재 범위 |
+| Place, Menu | `places` | 현재 범위 |
+| Performance | `performances` | 현재 범위 |
+| Notice (일반·상시) | `notices` | 현재 범위 |
+| LostItem (반환 상태 포함) | `lost-items` | 후속 범위 |
+
+수신기 계약은 `POST {USER_SITE_URL}/api/revalidate`다. Backoffice는 실행
+환경의 `REVALIDATE_SECRET`을 `Authorization: Bearer <secret>` 헤더에 넣고,
+다른 필드 없이 다음 JSON 본문을 보낸다.
+
+```json
+{"tag":"places"}
+```
+
+수신기의 `200`은 요청 성공, `400`은 잘못된 요청, `401`은 인증 실패다.
+`USER_SITE_URL` 또는 `REVALIDATE_SECRET`이 비어 있으면 전송을 건너뛴다.
+비어 있지 않은 잘못된 URL·설정은 앱 기동이나 CRUD 성공을 막지 않고 전송
+실패로 기록한다. 전송은 전체 요청 제한 10초, 한 번 시도, 재시도 및
+리다이렉트 없음으로 처리한다. 실패 로그에는 태그·실패 종류·HTTP 상태만
+남기고 비밀값, 원본 URL·헤더·본문·예외는 남기지 않는다.
 
 자동 재검증은 post-commit best-effort 작업이다. CRUD 성공 응답은 DB 반영
-성공을 의미하며 재검증 완료를 의미하지 않는다. 자동 요청 실패는
-운영 로그와 모니터링에 기록하고 운영자가 수동 재검증 API로 재시도한다.
+성공을 의미하며 프런트엔드 재생성 완료를 의미하지 않는다. 전송 실패는
+CRUD 응답을 바꾸지 않는다. 영속 큐나 재검증 상태 조회 API는 제공하지 않는다.
 
-### 7.2 수동 재검증
+### 7.2 수동 재검증 (후속 범위, 미구현)
+
+다음은 기존 수동 API 설계 초안이다. 이번 자동 webhook 구현에는 포함하지
+않으며, 구현 시 프런트엔드 태그 계약에 맞춰 별도로 재검토한다.
 
 #### POST `/api/v1/revalidations`
 
@@ -1423,7 +1469,7 @@ Bearer 인증이 필요하다.
 | -------- | ----------- | ---- | ------------------------------------------------- |
 | `target` | string enum | 예   | `PLACES`, `PERFORMANCES`, `NOTICES`, `LOST_ITEMS` |
 
-요청을 접수하면 `202 Accepted`를 반환한다.
+기존 설계에서는 요청을 접수하면 `202 Accepted`를 반환한다.
 
 ```json
 {
@@ -1432,10 +1478,9 @@ Bearer 인증이 필요하다.
 }
 ```
 
-`202`는 재검증 요청을 접수했다는 의미이며 프론트엔드 재생성 완료를
-보장하지 않는다. 요청 자체를 접수하지 못하면
-`500 INTERNAL_SERVER_ERROR`를 반환한다. ERD에 작업 상태 모델이 없으므로
-재검증 상태 조회 API는 제공하지 않는다.
+기존 설계의 `202`는 재검증 요청 접수를 뜻하며 프런트엔드 재생성 완료를
+보장하지 않는다. 기존 설계에서는 요청 자체를 접수하지 못하면
+`500 INTERNAL_SERVER_ERROR`를 반환한다. 이 경로는 아직 구현되지 않았다.
 
 ## 8. ERD와 API 매핑
 
@@ -1473,6 +1518,11 @@ Bearer 인증이 필요하다.
 ERD에는 구역 문자가 없으므로 API가 `A1`과 같은 구역 번호를 조합하지
 않는다. `category_sequence`, `x`, `y`만 반환하고 화면 표기 규칙은
 프론트엔드 계약으로 둔다.
+
+같은 구역 번호가 두 장소에 붙지 않도록 `PLACE`에
+`(category_id, category_sequence)` unique 제약을 둔다. 한 요청이 한 행만
+바꾸므로 공연의 `(date, seq)`와 달리 deferrable로 두지 않는다. 동시 요청이
+같은 쌍을 쓰려다 제약에 걸려도 5.4대로 `422 VALIDATION_ERROR`를 반환한다.
 
 ## 9. 계약 검증 시나리오
 
@@ -1527,8 +1577,10 @@ ERD에는 구역 문자가 없으므로 API가 `A1`과 같은 구역 번호를 �
 24. Place 삭제 시 연결된 Menu와 모든 번역이 삭제된다.
 25. Place가 연결된 Category 삭제는 `409 DELETE_CONFLICT`이며 어떤 행도
     삭제되지 않는다.
-26. Backoffice 쓰기 transaction이 commit된 뒤 올바른 ISR target의
-    재검증이 요청된다.
+26. 현재 Backoffice에 구현된 Category, Place, Menu, Notice, Performance
+    쓰기 경로 22개는 transaction commit 뒤 각 `categories`, `places`,
+    `notices`, `performances` 태그로 자동 재검증을 요청한다. LostItem 쓰기
+    경로 훅은 후속 범위다.
 27. 공연 목록과 상세 응답에는 `start_at`과 `end_at`이 없고 `date`,
     `seq`, `is_live`가 포함된다.
 28. 공연 목록은 `date ASC, seq ASC, id ASC`로 정렬되며, `date` query를
@@ -1553,3 +1605,8 @@ ERD에는 구역 문자가 없으므로 API가 `A1`과 같은 구역 번호를 �
 37. `PATCH`로 `date`만 바꾸면 대상 일차의 맨 뒤로 옮겨진다.
 38. 공연을 `DELETE`하거나 `PATCH`로 다른 일차에 옮기면 원래 일차의 남은
     공연이 `1`부터 연속이 되도록 다시 매겨진다.
+39. 같은 카테고리의 다른 장소가 쓰는 `category_sequence`로 `POST`하거나,
+    `PATCH`로 `category_id` 또는 `category_sequence`를 바꿔 그 쌍이 겹치면
+    `422 VALIDATION_ERROR`다. 동시 요청이 겹쳐도 500이 아니라 422다.
+40. 다른 카테고리의 장소와 같은 `category_sequence`는 허용하고, 장소가
+    자기 값을 다시 보내는 `PATCH`도 허용한다.

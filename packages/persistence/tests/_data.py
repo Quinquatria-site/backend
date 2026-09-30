@@ -1,10 +1,11 @@
 """Independent fixtures based on the PRD fields and API data constraints."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import text
 
 INSTANT = datetime(2026, 10, 6, 9, tzinfo=UTC)
+FESTIVAL_DAY = date(2026, 10, 6)
 
 VALID_IMAGE = {
     "s3_key": "images/place/first.webp",
@@ -49,8 +50,9 @@ VALID_ROWS = {
     "performance": {
         "type": "ARTIST",
         "image_id": None,
-        "start_at": INSTANT,
-        "end_at": INSTANT,
+        "date": FESTIVAL_DAY,
+        "seq": 1,
+        "is_live": False,
     },
     "performance_translation": {
         "performance_id": 1,
