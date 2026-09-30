@@ -1,8 +1,9 @@
 """분실물 테스트의 요청 본문과 이미지 시드 도구."""
 
+import asyncio
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select, text
 
 from quinquatria_persistence.enums import (
     ImageContentType,
@@ -59,6 +60,47 @@ async def seed_image(
 async def image_status(database, key: str) -> ImageStatus:
     async with database.session() as session:
         return await session.scalar(select(Image.status).where(Image.s3_key == key))
+
+
+async def wait_until_blocked(database, *, waiting: int = 1) -> None:
+    """다른 transaction의 행 잠금을 기다리는 backend가 `waiting`개가 될 때까지 둔다.
+
+    고정 sleep 대신 PostgreSQL이 보고하는 대기 상태로 경합 지점 도달을 확인한다.
+    """
+    probe = text(
+        "SELECT count(*) FROM pg_stat_activity"
+        " WHERE datname = current_database() AND wait_event_type = 'Lock'"
+    )
+
+    async def poll() -> None:
+        while True:
+            async with database.session() as session:
+                if await session.scalar(probe) >= waiting:
+                    return
+            await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(poll(), timeout=5)
+
+
+async def attached_orphans(database) -> int:
+    """어느 분실물도 참조하지 않는데 `ATTACHED`인 이미지 수. cleanup이 회수하지 못한다."""
+    referenced = select(LostItem.image_id).where(LostItem.image_id.is_not(None))
+    async with database.session() as session:
+        return await session.scalar(
+            select(func.count())
+            .select_from(Image)
+            .where(Image.status == ImageStatus.ATTACHED, ~Image.id.in_(referenced))
+        )
+
+
+async def stored_translations(database, lost_item_id: int) -> list[tuple[str, str]]:
+    async with database.session() as session:
+        rows = await session.execute(
+            select(LostItemTranslation.language_code, LostItemTranslation.title)
+            .where(LostItemTranslation.lost_item_id == lost_item_id)
+            .order_by(LostItemTranslation.language_code)
+        )
+        return [(code.value, title) for code, title in rows.tuples()]
 
 
 async def seed_lost_item(
