@@ -20,6 +20,7 @@ from backoffice.domains.lost_items.schemas import (
     LostItemQuery,
     LostItemTranslationOut,
 )
+from backoffice.revalidation.events import RevalidationTag, mark_changed
 from common.errors import ErrorResponse
 from common.pagination import Page
 from common.query import NoQuery
@@ -129,6 +130,7 @@ async def create_lost_item(
     await session.flush()
     # `created_at`은 DB 기본값이라 flush 뒤에 다시 읽어야 한다.
     await session.refresh(item, ["created_at"])
+    mark_changed(session, RevalidationTag.LOST_ITEMS)
     return await _one(session, item)
 
 
@@ -167,6 +169,7 @@ async def update_lost_item(
             max_bytes=settings.max_image_bytes,
         )
     await session.flush()
+    mark_changed(session, RevalidationTag.LOST_ITEMS)
     return await _one(session, item)
 
 
@@ -199,6 +202,7 @@ async def delete_lost_item(
     )
     await session.delete(item)
     await session.flush()
+    mark_changed(session, RevalidationTag.LOST_ITEMS)
     return Response(status_code=HTTPStatus.NO_CONTENT)
 
 
@@ -222,4 +226,5 @@ async def delete_lost_item_translation(
         owner_fk=LostItemTranslation.lost_item_id,
         language_code=language_code,
     )
+    mark_changed(session, RevalidationTag.LOST_ITEMS)
     return Response(status_code=HTTPStatus.NO_CONTENT)
