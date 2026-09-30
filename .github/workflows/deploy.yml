@@ -1,0 +1,106 @@
+name: Deploy
+
+# main의 CI가 성공한 커밋만 배포한다. 수동 실행은 선택한 브랜치의 최신 커밋을 배포한다.
+on:
+    workflow_run:
+        workflows: [CI]
+        types: [completed]
+        branches: [main]
+    workflow_dispatch:
+
+# 배포가 겹치면 컨테이너와 마이그레이션이 엉킨다. 진행 중인 배포는 취소하지 않는다.
+concurrency:
+    group: deploy-production
+    cancel-in-progress: false
+
+permissions:
+    contents: read
+    id-token: write
+
+jobs:
+    deploy:
+        name: EC2 배포
+        if: >-
+            github.event_name == 'workflow_dispatch' ||
+            (github.event.workflow_run.conclusion == 'success' &&
+             github.event.workflow_run.event == 'push')
+        runs-on: ubuntu-latest
+        timeout-minutes: 40
+        # 비밀값과 승인 규칙은 production Environment에 둔다.
+        environment: production
+        env:
+            AWS_REGION: ap-northeast-2
+            DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  ref: ${{ env.DEPLOY_SHA }}
+
+            # 정적 키 없이 OIDC로 배포 role을 assume한다. 설정은 docs/deploy/github-actions-deploy.md.
+            - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+              with:
+                  role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+                  aws-region: ${{ env.AWS_REGION }}
+
+            # SSM 명령 본문은 실행 기록에 평문으로 남는다. 비밀값은 SecureString으로만 넘긴다.
+            - name: 환경변수를 Parameter Store에 반영
+              env:
+                  CUSTOMER_ENV: ${{ secrets.CUSTOMER_ENV }}
+                  BACKOFFICE_ENV: ${{ secrets.BACKOFFICE_ENV }}
+              run: |
+                  for app in customer backoffice; do
+                      name="$(echo "$app" | tr '[:lower:]' '[:upper:]')_ENV"
+                      value="${!name}"
+                      if [ -z "$value" ]; then
+                          echo "::error::production Environment에 $name secret이 없습니다"
+                          exit 1
+                      fi
+                      aws ssm put-parameter --name "/quinquatria/$app.env" \
+                          --type SecureString --overwrite --value "$value" > /dev/null
+                  done
+
+            - name: EC2에서 배포 실행
+              env:
+                  INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+              run: |
+                  script="$(base64 -w0 .github/deploy/ec2-deploy.sh)"
+                  params="$(jq -n --arg script "$script" --arg sha "$DEPLOY_SHA" --arg region "$AWS_REGION" '{
+                      commands: [
+                          "echo \($script) | base64 -d > /tmp/quinquatria-deploy.sh",
+                          "DEPLOY_SHA=\($sha) AWS_REGION=\($region) bash /tmp/quinquatria-deploy.sh"
+                      ],
+                      executionTimeout: ["1800"]
+                  }')"
+                  command_id="$(aws ssm send-command \
+                      --instance-ids "$INSTANCE_ID" \
+                      --document-name AWS-RunShellScript \
+                      --comment "deploy ${DEPLOY_SHA::12}" \
+                      --parameters "$params" \
+                      --query Command.CommandId --output text)"
+                  echo "SSM command: $command_id"
+
+                  # aws ssm wait는 100초에서 끝나므로 빌드를 기다릴 수 있게 직접 조회한다.
+                  status=Pending
+                  for _ in $(seq 1 180); do
+                      sleep 10
+                      status="$(aws ssm get-command-invocation \
+                          --command-id "$command_id" --instance-id "$INSTANCE_ID" \
+                          --query Status --output text 2>/dev/null || echo Pending)"
+                      case "$status" in
+                          Pending|InProgress|Delayed) ;;
+                          *) break ;;
+                      esac
+                  done
+
+                  invocation() {
+                      aws ssm get-command-invocation \
+                          --command-id "$command_id" --instance-id "$INSTANCE_ID" \
+                          --query "$1" --output text
+                  }
+                  echo "::group::stdout"; invocation StandardOutputContent; echo "::endgroup::"
+                  echo "::group::stderr"; invocation StandardErrorContent; echo "::endgroup::"
+
+                  if [ "$status" != Success ]; then
+                      echo "::error::배포 실패 (SSM 상태: $status)"
+                      exit 1
+                  fi
