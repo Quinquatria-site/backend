@@ -19,6 +19,7 @@ from backoffice.domains.performances.schemas import (
     PerformancePatch,
     ReorderRequest,
 )
+from backoffice.revalidation.events import RevalidationTag, mark_changed
 from common.pagination import Page
 from common.query import NoQuery
 from common.types import ResourceId
@@ -45,6 +46,7 @@ async def reorder_performances(
     session: SessionDep,
 ) -> Response:
     await service.reorder(session, payload.date, payload.order)
+    mark_changed(session, RevalidationTag.PERFORMANCES)
     return Response(status_code=HTTPStatus.NO_CONTENT)
 
 
@@ -59,6 +61,7 @@ async def create_performance(
     performance = await service.create_performance(
         session, store, payload, max_image_bytes=settings.max_image_bytes
     )
+    mark_changed(session, RevalidationTag.PERFORMANCES)
     return await service.serialize_one(session, performance)
 
 
@@ -88,6 +91,7 @@ async def update_performance(
         payload,
         max_image_bytes=settings.max_image_bytes,
     )
+    mark_changed(session, RevalidationTag.PERFORMANCES)
     return await service.serialize_one(session, performance)
 
 
@@ -99,6 +103,7 @@ async def set_performance_live(
     session: SessionDep,
 ) -> PerformanceOut:
     performance = await service.set_live(session, performance_id, payload.is_live)
+    mark_changed(session, RevalidationTag.PERFORMANCES)
     return await service.serialize_one(session, performance)
 
 
@@ -117,6 +122,7 @@ async def delete_performance(
     await service.delete_performance(
         session, store, performance_id, max_image_bytes=settings.max_image_bytes
     )
+    mark_changed(session, RevalidationTag.PERFORMANCES)
     return Response(status_code=HTTPStatus.NO_CONTENT)
 
 
@@ -132,4 +138,5 @@ async def delete_performance_translation(
     session: SessionDep,
 ) -> Response:
     await service.delete_translation(session, performance_id, language_code)
+    mark_changed(session, RevalidationTag.PERFORMANCES)
     return Response(status_code=HTTPStatus.NO_CONTENT)
