@@ -5,12 +5,33 @@ set -euo pipefail
 
 : "${IMAGE_REGISTRY:?IMAGE_REGISTRY가 필요합니다}"
 : "${IMAGE_TAG:?IMAGE_TAG가 필요합니다}"
+: "${DEPLOY_PAYLOAD:?DEPLOY_PAYLOAD가 필요합니다}"
+: "${DEPLOY_SENT_AT:?DEPLOY_SENT_AT가 필요합니다}"
 REGION="${AWS_REGION:-ap-northeast-2}"
 APP_DIR=/opt/quinquatria
+LOCK_FILE=/var/lock/quinquatria-deploy.lock
 # SSM 셸의 PATH에는 snap으로 설치한 aws CLI가 없을 수 있다.
 export PATH="$PATH:/snap/bin:/usr/local/bin"
 
+# 조회가 끝난 workflow의 명령이 늦게 실행돼도 다른 배포와 겹치지 않게 전 구간을 잠근다.
+exec 9> "$LOCK_FILE"
+if ! flock -w 900 9; then
+    echo "다른 배포가 15분 넘게 진행 중이라 중단합니다" >&2
+    exit 1
+fi
+
+mkdir -p "$APP_DIR"
 cd "$APP_DIR"
+
+# 늦게 전달된 옛 명령이 더 최근 배포를 되돌리지 않게 보낸 시각 순서만 허용한다.
+last_sent_at="$(cat .deployed-sent-at 2>/dev/null || echo 0)"
+if [ "$DEPLOY_SENT_AT" -lt "$last_sent_at" ]; then
+    echo "더 최근에 보낸 배포($last_sent_at)가 이미 적용돼 이 명령($DEPLOY_SENT_AT)은 건너뜁니다" >&2
+    exit 1
+fi
+echo "$DEPLOY_SENT_AT" > .deployed-sent-at
+
+install -m 644 "$DEPLOY_PAYLOAD/compose.yaml" compose.yaml
 
 tmp=""
 cleanup() { if [ -n "$tmp" ]; then rm -f "$tmp"; fi; }

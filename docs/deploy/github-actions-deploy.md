@@ -227,7 +227,18 @@ Settings → Environments → `production`을 만듭니다.
 - `workflow_run`은 기본 브랜치(`main`)에 있는 workflow 파일만 실행합니다. 이
   파일이 `main`에 들어간 다음 push부터 자동 배포가 시작됩니다. 첫 배포는
   Actions → Deploy → Run workflow로 실행합니다.
+- 자동 배포는 **`main` 최신 커밋만** 대상으로 합니다. 과거 커밋의 CI를 재실행하면
+  그 성공 이벤트는 원래 SHA를 싣고 오므로, 최신이 아니면 승인 요청 없이 건너뜁니다.
+  승인을 기다리는 사이 `main`이 바뀌면 그 실행은 실패하고 최신 커밋의 실행이
+  이어서 배포합니다.
 - 배포는 한 번에 하나씩만 실행하고, 진행 중인 배포는 취소하지 않습니다.
+- EC2에서는 배포 전 구간을 `/var/lock/quinquatria-deploy.lock`으로 잠급니다.
+  workflow가 조회를 끝낸 뒤 늦게 실행된 명령도 다른 배포와 겹치지 않습니다.
+- 명령마다 보낸 시각을 싣고, 서버는 마지막으로 적용한 시각
+  (`/opt/quinquatria/.deployed-sent-at`)보다 오래된 명령을 거부합니다. 늦게
+  전달된 옛 명령이 더 최근 배포를 되돌리지 않습니다.
+- SSM 전달 대기는 600초, 실행은 1800초로 제한합니다. 조회 한도를 넘기면
+  workflow가 명령을 취소하고 종료를 확인합니다.
 - secret 값을 바꾸면 다음 배포부터 반영됩니다. 바로 반영하려면 Run workflow를
   실행합니다. 같은 커밋이면 이미지를 다시 빌드하지 않습니다.
 - 실행 결과는 Actions 로그의 stdout, stderr 그룹과 Systems Manager →
