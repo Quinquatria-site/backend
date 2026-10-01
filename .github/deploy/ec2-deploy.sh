@@ -28,6 +28,22 @@ if [ "$(printf '%s\n' 2.30.0 "$compose_version" | sort -V | head -n 1)" != 2.30.
     exit 1
 fi
 
+# SSM이 실행 한도에서 셸을 SIGKILL해도 daemon이 띄운 migration 컨테이너는 남는다.
+# 잠금만으로는 막지 못하므로 라벨로 찾아 끝날 때까지 기다린 뒤에 파일을 바꾼다.
+MIGRATE_NAME=quinquatria-migrate
+MIGRATE_LABEL=quinquatria.role=migrate
+running_migrations="$(docker ps -q --filter "label=$MIGRATE_LABEL")"
+if [ -n "$running_migrations" ]; then
+    echo "이전 배포의 마이그레이션 컨테이너가 실행 중이라 종료를 기다립니다"
+    # shellcheck disable=SC2086 # 컨테이너 ID 목록을 인자로 나눈다.
+    if ! timeout "${MIGRATION_WAIT_SECONDS:-600}" docker wait $running_migrations > /dev/null; then
+        echo "이전 마이그레이션이 끝나지 않아 배포를 중단합니다. docker ps --filter label=$MIGRATE_LABEL 로 확인하세요" >&2
+        exit 1
+    fi
+fi
+# 강제 종료로 --rm 정리가 안 된 컨테이너가 이름을 점유하지 않게 지운다.
+docker rm "$MIGRATE_NAME" > /dev/null 2>&1 || true
+
 mkdir -p "$APP_DIR"
 cd "$APP_DIR"
 
@@ -63,7 +79,9 @@ printf 'IMAGE_REGISTRY=%s\nIMAGE_TAG=%s\n' "$IMAGE_REGISTRY" "$IMAGE_TAG" > .env
 aws ecr get-login-password --region "$REGION" \
     | docker login --username AWS --password-stdin "$IMAGE_REGISTRY" > /dev/null
 docker compose pull --quiet
-docker compose run --rm backoffice alembic upgrade head
+# 이름을 고정해 두 migration이 동시에 뜨면 두 번째가 이름 충돌로 실패하게 한다.
+docker compose run --rm --name "$MIGRATE_NAME" --label "$MIGRATE_LABEL" \
+    backoffice alembic upgrade head
 docker compose up -d --remove-orphans
 
 for port in 8001 8002; do

@@ -250,6 +250,11 @@ Settings → Environments → `production`을 만듭니다.
   전달된 옛 명령이 더 최근 배포를 되돌리지 않습니다.
 - SSM 전달 대기는 600초, 실행은 1800초로 제한합니다. 조회 한도를 넘기면
   workflow가 명령을 취소하고 종료를 확인합니다.
+- SSM이 실행 한도에서 셸을 강제 종료해도 Docker가 띄운 마이그레이션 컨테이너는
+  계속 실행될 수 있습니다. 마이그레이션 컨테이너는 이름(`quinquatria-migrate`)과
+  라벨(`quinquatria.role=migrate`)을 고정하고, 다음 배포는 파일을 바꾸기 전에 이
+  컨테이너가 끝날 때까지 최대 10분 기다립니다. 끝나지 않으면 배포를 중단합니다.
+  확인: `sudo docker ps --filter label=quinquatria.role=migrate`
 - secret 값을 바꾸면 다음 배포부터 반영됩니다. 바로 반영하려면 Run workflow를
   실행합니다. 같은 커밋이면 이미지를 다시 빌드하지 않습니다.
 - 실행 결과는 Actions 로그의 stdout, stderr 그룹과 Systems Manager →
