@@ -62,8 +62,15 @@ cleanup() { if [ -n "$tmp" ]; then rm -f "$tmp"; fi; }
 trap cleanup EXIT
 for app in customer backoffice; do
     tmp="$(mktemp "$APP_DIR/.$app.env.XXXXXX")"
-    aws ssm get-parameter --region "$REGION" --name "/quinquatria/$app.env" \
-        --with-decryption --query Parameter.Value --output text > "$tmp"
+    # Run Command가 띄운 snap aws는 파일로 리다이렉트한 출력이 오류 없이 버려진다.
+    # 명령 치환으로 받고, 빈 값이면 빈 env로 배포하지 않도록 멈춘다.
+    value="$(aws ssm get-parameter --region "$REGION" --name "/quinquatria/$app.env" \
+        --with-decryption --query Parameter.Value --output text)"
+    if [ -z "$value" ]; then
+        echo "/quinquatria/$app.env 값을 읽지 못했습니다" >&2
+        exit 1
+    fi
+    printf '%s\n' "$value" > "$tmp"
     chmod 600 "$tmp"
     mv "$tmp" "$app.env"
     tmp=""
