@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# deploy.yml이 SSM Run Command로 EC2에서 root로 실행한다.
+# 출력이 SSM 실행 기록과 Actions 로그에 남으므로 set -x와 비밀값 출력을 쓰지 않는다.
+set -euo pipefail
+
+: "${IMAGE_REGISTRY:?IMAGE_REGISTRY가 필요합니다}"
+: "${IMAGE_TAG:?IMAGE_TAG가 필요합니다}"
+: "${DEPLOY_PAYLOAD:?DEPLOY_PAYLOAD가 필요합니다}"
+: "${DEPLOY_SENT_AT:?DEPLOY_SENT_AT가 필요합니다}"
+REGION="${AWS_REGION:-ap-northeast-2}"
+APP_DIR=/opt/quinquatria
+LOCK_FILE=/var/lock/quinquatria-deploy.lock
+# SSM 셸의 PATH에는 snap으로 설치한 aws CLI가 없을 수 있다.
+export PATH="$PATH:/snap/bin:/usr/local/bin"
+
+# 조회가 끝난 workflow의 명령이 늦게 실행돼도 다른 배포와 겹치지 않게 전 구간을 잠근다.
+exec 9> "$LOCK_FILE"
+if ! flock -w 900 9; then
+    echo "다른 배포가 15분 넘게 진행 중이라 중단합니다" >&2
+    exit 1
+fi
+
+# compose.yaml의 env_file `format: raw`는 2.30부터 지원한다. 파일을 바꾸기 전에 확인한다.
+compose_version="$(docker compose version --short)"
+compose_version="${compose_version#v}"
+if [ "$(printf '%s\n' 2.30.0 "$compose_version" | sort -V | head -n 1)" != 2.30.0 ]; then
+    echo "Docker Compose $compose_version 은 지원하지 않습니다. 2.30 이상이 필요합니다" >&2
+    exit 1
+fi
+
+# SSM이 실행 한도에서 셸을 SIGKILL해도 daemon이 띄운 migration 컨테이너는 남는다.
+# 잠금만으로는 막지 못하므로 라벨로 찾아 끝날 때까지 기다린 뒤에 파일을 바꾼다.
+MIGRATE_NAME=quinquatria-migrate
+MIGRATE_LABEL=quinquatria.role=migrate
+running_migrations="$(docker ps -q --filter "label=$MIGRATE_LABEL")"
+if [ -n "$running_migrations" ]; then
+    echo "이전 배포의 마이그레이션 컨테이너가 실행 중이라 종료를 기다립니다"
+    # shellcheck disable=SC2086 # 컨테이너 ID 목록을 인자로 나눈다.
+    if ! timeout "${MIGRATION_WAIT_SECONDS:-600}" docker wait $running_migrations > /dev/null; then
+        echo "이전 마이그레이션이 끝나지 않아 배포를 중단합니다. docker ps --filter label=$MIGRATE_LABEL 로 확인하세요" >&2
+        exit 1
+    fi
+fi
+# 강제 종료로 --rm 정리가 안 된 컨테이너가 이름을 점유하지 않게 지운다.
+docker rm "$MIGRATE_NAME" > /dev/null 2>&1 || true
+
+mkdir -p "$APP_DIR"
+cd "$APP_DIR"
+
+# 늦게 전달된 옛 명령이 더 최근 배포를 되돌리지 않게 보낸 시각 순서만 허용한다.
+last_sent_at="$(cat .deployed-sent-at 2>/dev/null || echo 0)"
+if [ "$DEPLOY_SENT_AT" -lt "$last_sent_at" ]; then
+    echo "더 최근에 보낸 배포($last_sent_at)가 이미 적용돼 이 명령($DEPLOY_SENT_AT)은 건너뜁니다" >&2
+    exit 1
+fi
+echo "$DEPLOY_SENT_AT" > .deployed-sent-at
+
+install -m 644 "$DEPLOY_PAYLOAD/compose.yaml" compose.yaml
+
+tmp=""
+cleanup() { if [ -n "$tmp" ]; then rm -f "$tmp"; fi; }
+trap cleanup EXIT
+for app in customer backoffice; do
+    tmp="$(mktemp "$APP_DIR/.$app.env.XXXXXX")"
+    aws ssm get-parameter --region "$REGION" --name "/quinquatria/$app.env" \
+        --with-decryption --query Parameter.Value --output text > "$tmp"
+    chmod 600 "$tmp"
+    mv "$tmp" "$app.env"
+    tmp=""
+done
+echo "환경변수 파일 갱신 완료"
+
+# compose.yaml이 변수 치환에 쓰는 값. 직전 태그를 남겨 수동 롤백에 쓴다.
+if [ -f .env ]; then
+    grep '^IMAGE_TAG=' .env | sed 's/^/PREVIOUS_/' > .env.previous || true
+fi
+printf 'IMAGE_REGISTRY=%s\nIMAGE_TAG=%s\n' "$IMAGE_REGISTRY" "$IMAGE_TAG" > .env
+
+aws ecr get-login-password --region "$REGION" \
+    | docker login --username AWS --password-stdin "$IMAGE_REGISTRY" > /dev/null
+docker compose pull --quiet
+# 이름을 고정해 두 migration이 동시에 뜨면 두 번째가 이름 충돌로 실패하게 한다.
+docker compose run --rm --name "$MIGRATE_NAME" --label "$MIGRATE_LABEL" \
+    backoffice alembic upgrade head
+docker compose up -d --remove-orphans
+
+for port in 8001 8002; do
+    for attempt in $(seq 1 30); do
+        if curl -fsS -o /dev/null "http://127.0.0.1:$port/api/v1/"; then
+            echo "127.0.0.1:$port 응답 확인"
+            break
+        fi
+        if [ "$attempt" -eq 30 ]; then
+            echo "127.0.0.1:$port 가 60초 안에 응답하지 않았습니다" >&2
+            docker compose ps >&2
+            exit 1
+        fi
+        sleep 2
+    done
+done
+
+# 실행 중이 아니고 만든 지 사흘이 지난 이미지만 지운다. 최근 이미지는 롤백용으로 남긴다.
+docker image prune -af --filter 'until=72h' > /dev/null
+echo "배포 완료: $IMAGE_TAG"

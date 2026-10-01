@@ -1,0 +1,227 @@
+name: Deploy
+
+# main의 CI가 성공한 최신 커밋을 배포한다. 수동 실행에 image_tag를 주면 그 커밋으로 롤백한다.
+on:
+    workflow_run:
+        workflows: [CI]
+        types: [completed]
+        branches: [main]
+    workflow_dispatch:
+        inputs:
+            image_tag:
+                description: 배포할 커밋 SHA 40자. 비우면 main 최신 커밋
+                required: false
+                default: ''
+
+permissions:
+    contents: read
+
+jobs:
+    # 승인 요청 전에 대상을 정한다. 배포하지 않을 실행이 승인을 기다리지 않게 한다.
+    target:
+        name: 배포 대상 확인
+        if: >-
+            github.event_name == 'workflow_dispatch' ||
+            (github.event.workflow_run.conclusion == 'success' &&
+             github.event.workflow_run.event == 'push')
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        outputs:
+            image_tag: ${{ steps.resolve.outputs.image_tag }}
+            deploy: ${{ steps.resolve.outputs.deploy }}
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
+
+            - id: resolve
+              env:
+                  INPUT_TAG: ${{ inputs.image_tag }}
+                  RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+              run: |
+                  main_head="$(git rev-parse origin/main)"
+                  if [ "$GITHUB_EVENT_NAME" = workflow_run ]; then
+                      # 과거 커밋의 CI를 재실행해도 원래 SHA로 이벤트가 온다. 최신 main만 자동 배포한다.
+                      if [ "$RUN_SHA" != "$main_head" ]; then
+                          echo "::notice::$RUN_SHA 는 main 최신 커밋($main_head)이 아니라 배포하지 않습니다"
+                          echo "deploy=false" >> "$GITHUB_OUTPUT"
+                          exit 0
+                      fi
+                      tag="$RUN_SHA"
+                  else
+                      tag="${INPUT_TAG:-$main_head}"
+                  fi
+
+                  if ! [[ "$tag" =~ ^[0-9a-f]{40}$ ]]; then
+                      echo "::error::image_tag는 커밋 SHA 40자여야 합니다: $tag"
+                      exit 1
+                  fi
+                  # 롤백 입력으로 리뷰를 거치지 않은 브랜치의 커밋이 배포되지 않게 한다.
+                  if ! git merge-base --is-ancestor "$tag" origin/main; then
+                      echo "::error::$tag 는 main 이력에 없는 커밋입니다"
+                      exit 1
+                  fi
+                  echo "image_tag=$tag" >> "$GITHUB_OUTPUT"
+                  echo "deploy=true" >> "$GITHUB_OUTPUT"
+
+    deploy:
+        name: EC2 배포
+        needs: target
+        if: needs.target.outputs.deploy == 'true'
+        runs-on: ubuntu-latest
+        timeout-minutes: 60
+        # 배포 job에만 건다. 건너뛸 실행이 대기 중인 배포를 밀어내지 않게 한다.
+        concurrency:
+            group: deploy-production
+            cancel-in-progress: false
+        # 비밀값과 승인 규칙은 production Environment에 둔다.
+        environment: production
+        permissions:
+            contents: read
+            id-token: write
+        env:
+            AWS_REGION: ap-northeast-2
+            IMAGE_TAG: ${{ needs.target.outputs.image_tag }}
+        steps:
+            # 배포 보조 파일(.github/deploy)은 실행 중인 workflow의 revision에서 읽는다.
+            # 앱 소스만 배포할 커밋으로 app/에 받아, 배포 파일이 없던 과거 커밋도 롤백할 수 있게 한다.
+            - uses: actions/checkout@v7
+              with:
+                  ref: ${{ github.workflow_sha }}
+
+            - uses: actions/checkout@v7
+              with:
+                  ref: ${{ env.IMAGE_TAG }}
+                  path: app
+
+            # 승인을 기다리는 사이 main이 앞서 나갔으면 뒤이은 실행이 배포하도록 넘긴다.
+            - name: 자동 배포 대상이 여전히 최신인지 확인
+              if: github.event_name == 'workflow_run'
+              run: |
+                  git fetch --quiet --depth=1 origin main
+                  if [ "$(git rev-parse FETCH_HEAD)" != "$IMAGE_TAG" ]; then
+                      echo "::error::승인 대기 중 main이 바뀌었습니다. 최신 커밋의 배포가 이어서 실행됩니다"
+                      exit 1
+                  fi
+
+            # 정적 키 없이 OIDC로 배포 role을 assume한다. 설정은 docs/deploy/github-actions-deploy.md.
+            - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+              with:
+                  role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+                  aws-region: ${{ env.AWS_REGION }}
+
+            - name: ECR 로그인
+              run: |
+                  account="$(aws sts get-caller-identity --query Account --output text)"
+                  registry="$account.dkr.ecr.$AWS_REGION.amazonaws.com"
+                  echo "IMAGE_REGISTRY=$registry" >> "$GITHUB_ENV"
+                  aws ecr get-login-password | docker login --username AWS --password-stdin "$registry"
+
+            # 태그는 불변이다. 같은 커밋의 이미지가 있으면 재빌드하지 않아 롤백이 빠르다.
+            - name: 이미지 빌드와 push
+              run: |
+                  for app in customer backoffice; do
+                      repo="quinquatria-$app"
+                      if aws ecr describe-images --repository-name "$repo" \
+                          --image-ids imageTag="$IMAGE_TAG" > /dev/null 2>&1; then
+                          echo "$repo:$IMAGE_TAG 이미 있음, 빌드 생략"
+                          continue
+                      fi
+                      image="$IMAGE_REGISTRY/$repo:$IMAGE_TAG"
+                      docker build -f "app/Dockerfile.$app" -t "$image" app
+                      docker push "$image"
+                  done
+
+            # SSM 명령 본문은 실행 기록에 평문으로 남는다. 비밀값은 SecureString으로만 넘긴다.
+            - name: 환경변수를 Parameter Store에 반영
+              env:
+                  CUSTOMER_ENV: ${{ secrets.CUSTOMER_ENV }}
+                  BACKOFFICE_ENV: ${{ secrets.BACKOFFICE_ENV }}
+              run: |
+                  for app in customer backoffice; do
+                      name="$(echo "$app" | tr '[:lower:]' '[:upper:]')_ENV"
+                      value="${!name}"
+                      if [ -z "$value" ]; then
+                          echo "::error::production Environment에 $name secret이 없습니다"
+                          exit 1
+                      fi
+                      aws ssm put-parameter --name "/quinquatria/$app.env" \
+                          --type SecureString --overwrite --value "$value" > /dev/null
+                  done
+
+            - name: EC2에서 배포 실행
+              env:
+                  INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+                  # 전달 대기와 실행 한도. 조회 한도는 둘의 합보다 길어야 한다.
+                  DELIVERY_TIMEOUT: 600
+                  EXECUTION_TIMEOUT: 1800
+              run: |
+                  compose="$(base64 -w0 .github/deploy/compose.yaml)"
+                  script="$(base64 -w0 .github/deploy/ec2-deploy.sh)"
+                  sent_at="$(date +%s)"
+                  # 파일은 명령마다 다른 임시 폴더에 받고, 운영 경로로는 스크립트가 잠금 안에서 옮긴다.
+                  params="$(jq -n \
+                      --arg compose "$compose" --arg script "$script" --arg sent_at "$sent_at" \
+                      --arg registry "$IMAGE_REGISTRY" --arg tag "$IMAGE_TAG" --arg region "$AWS_REGION" \
+                      --arg timeout "$EXECUTION_TIMEOUT" '{
+                      commands: [
+                          "set -eu",
+                          "work=$(mktemp -d /tmp/quinquatria-deploy.XXXXXX)",
+                          "trap '\''rm -rf \"$work\"'\'' EXIT",
+                          "echo \($compose) | base64 -d > \"$work/compose.yaml\"",
+                          "echo \($script) | base64 -d > \"$work/deploy.sh\"",
+                          "DEPLOY_PAYLOAD=\"$work\" DEPLOY_SENT_AT=\($sent_at) IMAGE_REGISTRY=\($registry) IMAGE_TAG=\($tag) AWS_REGION=\($region) bash \"$work/deploy.sh\""
+                      ],
+                      executionTimeout: [$timeout]
+                  }')"
+                  command_id="$(aws ssm send-command \
+                      --instance-ids "$INSTANCE_ID" \
+                      --document-name AWS-RunShellScript \
+                      --comment "deploy ${IMAGE_TAG::12}" \
+                      --timeout-seconds "$DELIVERY_TIMEOUT" \
+                      --parameters "$params" \
+                      --query Command.CommandId --output text)"
+                  echo "SSM command: $command_id"
+
+                  invocation() {
+                      aws ssm get-command-invocation \
+                          --command-id "$command_id" --instance-id "$INSTANCE_ID" \
+                          --query "$1" --output text 2>/dev/null
+                  }
+                  # 끝나지 않은 상태면 0을 반환한다. 조회 실패도 끝나지 않은 것으로 본다.
+                  running() {
+                      status="$(invocation Status || echo Pending)"
+                      case "$status" in
+                          Pending|InProgress|Delayed|Cancelling) return 0 ;;
+                          *) return 1 ;;
+                      esac
+                  }
+                  wait_until_done() {
+                      local deadline=$(( $(date +%s) + $1 ))
+                      while running; do
+                          if [ "$(date +%s)" -ge "$deadline" ]; then
+                              return 1
+                          fi
+                          sleep 10
+                      done
+                  }
+
+                  if ! wait_until_done $(( DELIVERY_TIMEOUT + EXECUTION_TIMEOUT + 120 )); then
+                      echo "::warning::상태 조회 한도를 넘어 원격 명령($status)을 취소합니다"
+                      # 취소 요청이 실패해도(막 끝난 명령 등) 종료 확인은 이어서 한다.
+                      if ! aws ssm cancel-command --command-id "$command_id" --instance-ids "$INSTANCE_ID"; then
+                          echo "::warning::취소 요청이 실패했습니다. 종료 여부를 계속 확인합니다"
+                      fi
+                      if ! wait_until_done 300; then
+                          echo "::error::원격 명령의 종료를 확인하지 못했습니다($status). 서버의 배포 잠금이 다음 배포와의 중첩을 막습니다"
+                          exit 1
+                      fi
+                  fi
+
+                  echo "::group::stdout"; invocation StandardOutputContent || true; echo "::endgroup::"
+                  echo "::group::stderr"; invocation StandardErrorContent || true; echo "::endgroup::"
+
+                  if [ "$status" != Success ]; then
+                      echo "::error::배포 실패 (SSM 상태: $status)"
+                      exit 1
+                  fi
