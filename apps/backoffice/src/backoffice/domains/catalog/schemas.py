@@ -48,16 +48,11 @@ class CategoryTranslationIn(TranslationIn):
     name: RequiredLine
 
 
-class CategoryCreate(RequestModel):
-    code: CategoryCode
-    category_icon_uri: str | None = None
-    translations: CreateTranslations[CategoryTranslationIn]
-
-
 class CategoryPatch(PatchModel):
+    """`code`는 고정 목록의 식별자라 바꿀 수 없다 (명세 §5.3)."""
+
     NULLABLE = frozenset({"category_icon_uri"})
 
-    code: CategoryCode | None = None
     category_icon_uri: str | None = None
     translations: PatchTranslations[CategoryTranslationIn] | None = None
 
@@ -84,13 +79,31 @@ type PlaceImageKeys = Annotated[list[StrictStr], Field(min_length=1)]
 """빈 배열 대신 `null`로 "이미지 없음"을 표현한다 (명세 §5.4)."""
 
 
-def ensure_hours_ordered(start_hour: datetime, end_hour: datetime) -> None:
-    """같은 시각은 허용한다. 위반은 422 VALIDATION_ERROR다.
+PLACE_PAIRS = (("category_id", "category_sequence"), ("start_hour", "end_hour"))
+"""함께 있거나 함께 비어야 하는 장소 필드 (명세 §5.4)."""
+
+
+def ensure_place_rules(values: dict[str, object]) -> None:
+    """요청 반영 후 장소 값으로 짝과 시각 순서를 판정한다. 위반은 422다.
 
     `PATCH`는 한쪽만 보낼 수 있어 기존 값과 합친 결과로 판정해야 하므로,
     본문 검증기가 아니라 라우트에서 부른다.
     """
-    if end_hour < start_hour:
+    missing = [
+        second if values[second] is None else first
+        for first, second in PLACE_PAIRS
+        if (values[first] is None) != (values[second] is None)
+    ]
+    if missing:
+        raise ApiError(
+            ErrorCode.VALIDATION_ERROR,
+            details=[
+                ErrorDetail(field=field, reason="짝을 이루는 값과 함께 보내야 합니다.")
+                for field in missing
+            ],
+        )
+    start_hour, end_hour = values["start_hour"], values["end_hour"]
+    if start_hour is not None and end_hour < start_hour:
         raise ApiError(
             ErrorCode.VALIDATION_ERROR,
             details=[
@@ -106,14 +119,16 @@ class PlaceTranslationIn(TranslationIn):
 
 
 class PlaceCreate(RequestModel):
-    category_id: ParentId
-    category_sequence: Position
+    """좌표만 필수다. 나머지는 생성 뒤 `PATCH`로 채울 수 있다 (명세 §5.4)."""
+
     x: Coordinate
     y: Coordinate
-    start_hour: AwareDatetime
-    end_hour: AwareDatetime
+    category_id: ParentId | None = None
+    category_sequence: Position | None = None
+    start_hour: AwareDatetime | None = None
+    end_hour: AwareDatetime | None = None
     place_image_uri: PlaceImageKeys | None = None
-    translations: CreateTranslations[PlaceTranslationIn]
+    translations: CreateTranslations[PlaceTranslationIn] | None = None
 
 
 class PlaceTranslationOut(ResponseModel):
@@ -127,18 +142,20 @@ class PlaceTranslationOut(ResponseModel):
 
 class PlaceOut(ResponseModel):
     id: int
-    category_id: int
-    category_sequence: int
+    category_id: int | None
+    category_sequence: int | None
     x: float
     y: float
-    start_hour: UtcDatetime
-    end_hour: UtcDatetime
+    start_hour: UtcDatetime | None
+    end_hour: UtcDatetime | None
     place_image_uri: list[str] | None
     translations: list[PlaceTranslationOut]
 
 
 class PlacePatch(PatchModel):
-    NULLABLE = frozenset({"place_image_uri"})
+    NULLABLE = frozenset(
+        {"place_image_uri", *(name for pair in PLACE_PAIRS for name in pair)}
+    )
 
     category_id: ParentId | None = None
     category_sequence: Position | None = None

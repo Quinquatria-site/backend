@@ -11,7 +11,7 @@ from quinquatria_persistence.models import (
     PlaceTranslation,
 )
 
-from ._helpers import create_category, create_menu, create_place, upload
+from ._helpers import create_menu, create_place, seeded_category, upload
 
 
 async def _count(database, column) -> int:
@@ -27,7 +27,7 @@ async def _status(database, key: str) -> ImageStatus:
 async def test_delete_cascades_and_detaches_every_image(
     api, database, object_store
 ) -> None:
-    category = await create_category(api)
+    category = await seeded_category(api)
     place_key = await upload(api, object_store, "PLACE_IMAGE")
     menu_key = await upload(api, object_store, "MENU_IMAGE")
     place = await create_place(api, category["id"], place_image_uri=[place_key])
@@ -57,7 +57,7 @@ async def test_delete_missing_place_is_404(api) -> None:
 
 
 async def test_translation_delete_rules(api) -> None:
-    category = await create_category(api)
+    category = await seeded_category(api)
     place = await create_place(
         api,
         category["id"],
