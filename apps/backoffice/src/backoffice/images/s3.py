@@ -15,8 +15,12 @@ from backoffice.images.store import ObjectHead, ObjectSummary
 
 _MISSING = {"404", "NoSuchKey", "NotFound"}
 
-_SIGV4 = Config(signature_version="s3v4")
-"""옛 리전은 endpoint 해석에서 SigV2가 먼저 걸려 `If-None-Match` 서명이 빠진다."""
+_SIGV4 = Config(signature_version="s3v4", s3={"addressing_style": "virtual"})
+"""옛 리전은 endpoint 해석에서 SigV2가 먼저 걸려 `If-None-Match` 서명이 빠진다.
+
+addressing style을 고정하지 않으면 presigned URL이 리전 없는 전역 endpoint로
+나온다. 거기서는 PUT이 CORS 헤더 없는 307을 받아 브라우저 업로드가 막힌다.
+"""
 
 
 class S3ObjectStore:
