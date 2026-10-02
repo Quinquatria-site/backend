@@ -66,6 +66,13 @@ async def test_signature_is_present(store: S3ObjectStore) -> None:
     assert parse_qs(urlparse(url).query)["X-Amz-Signature"]
 
 
+async def test_presigned_url_uses_the_regional_endpoint(store: S3ObjectStore) -> None:
+    """전역 endpoint는 실제 PUT에 CORS 헤더 없는 307을 돌려줘 브라우저가 막는다."""
+    url = await store.presign_put(KEY, content_type="image/webp", expires_in=300)
+
+    assert urlparse(url).hostname == f"{BUCKET}.s3.{REGION}.amazonaws.com"
+
+
 # SigV2를 아직 받아주는 리전들. 서명 방식을 endpoint 해석에 맡기면 여기서만
 # SigV2로 떨어지고, 헤더를 서명할 수단이 없어 If-None-Match가 사라진다.
 @pytest.mark.parametrize("region", ["ap-northeast-2", "us-east-1", "eu-west-1"])
