@@ -43,12 +43,12 @@ _LINE_BREAKS = frozenset("\n\r\t")
 type RequiredLine = Annotated[
     str, AfterValidator(partial(_clean, allowed=_NONE, required=True))
 ]
-"""한 줄 필수 필드. `name`, `title`, `host_college`."""
+"""한 줄 필수 필드. `name`, `title` (장소 번역 제외)."""
 
 type OptionalLine = Annotated[
     str, AfterValidator(partial(_clean, allowed=_NONE, required=False))
 ]
-"""한 줄 선택 필드. `found_location`."""
+"""한 줄 선택 필드. `found_location`, 장소 번역의 `name`·`host_college`."""
 
 type RequiredText = Annotated[
     str, AfterValidator(partial(_clean, allowed=_LINE_BREAKS, required=True))

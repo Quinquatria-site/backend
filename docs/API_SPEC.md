@@ -82,9 +82,9 @@ Customer API와 Backoffice API는 별도 FastAPI 애플리케이션으로 배포
   처리한다.
 - `place_image_uri` 배열의 순서는 화면 노출 순서이며 API가 보존한다.
   이미지가 없으면 빈 배열이 아니라 `null`이다.
-- 번역의 `description`과 `found_location`은 선택이며 생략하면 빈
-  문자열로 저장한다. 응답에는 항상 문자열로 포함하며 `null`이 아니다.
-  나머지 번역 필드는 필수다.
+- 번역의 `description`과 `found_location`, 장소 번역의 `name`과
+  `host_college`는 선택이며 생략하면 빈 문자열로 저장한다. 응답에는 항상
+  문자열로 포함하며 `null`이 아니다. 나머지 번역 필드는 필수다.
 - 번역 텍스트 필드는 앞뒤 공백을 제거한 값으로 저장한다. 필수 필드는
   제거 후 1자 이상이어야 하며, 빈 문자열이나 공백만 보내면
   `422 VALIDATION_ERROR`다.
@@ -1096,8 +1096,8 @@ DB migration이 아래 행과 번역을 미리 입력하며, Backoffice API로 �
 | `id`            | integer     | 보내지 않음 | 포함 | 번역 ID                                |
 | `place_id`      | integer     | 보내지 않음 | 포함 | 장소 ID                                |
 | `language_code` | string enum | 필수        | 포함 | 번역 언어                              |
-| `name`          | string      | 필수        | 포함 | 장소명                                 |
-| `host_college`  | string      | 필수        | 포함 | 주최 단과대                            |
+| `name`          | string      | 선택        | 포함 | 장소명, 생략 시 빈 문자열              |
+| `host_college`  | string      | 선택        | 포함 | 주최 단과대, 생략 시 빈 문자열         |
 | `description`   | string      | 선택        | 포함 | 장소 또는 부스 설명, 생략 시 빈 문자열 |
 
 좌표만으로 생성하는 요청 예시:
