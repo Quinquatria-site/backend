@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy import select
 
-from backoffice.images.service import attach
+from backoffice.images.service import attach, attach_many
 from common.errors import ApiError, ErrorCode
 from quinquatria_persistence.enums import (
     CategoryCode,
@@ -132,3 +132,104 @@ async def test_losing_attach_leaves_the_winner_untouched(database, store) -> Non
     assert [category.code for category in categories] == [CategoryCode.PUB]
     assert categories[0].image_id == stored.id
     assert stored.status is ImageStatus.ATTACHED
+
+
+PLACE_KEYS = ("images/place/a.webp", "images/place/b.webp")
+MEET_WITHIN = 0.5
+"""두 요청이 첫 검증에서 서로를 기다리는 한도. 잠금에 막힌 쪽은 오지 못한다."""
+
+
+class MeetingStore(FakeObjectStore):
+    """처음 두 `head`가 서로를 기다렸다가 함께 진행하게 한다.
+
+    두 요청이 각자 첫 이미지를 잠근 채 다음 이미지로 넘어가는 순간을
+    재현한다. 한쪽이 잠금에 막혀 오지 못하면 한도 후 혼자 진행한다.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.arrivals = 0
+        self.met = asyncio.Event()
+
+    async def head(self, key: str):
+        self.arrivals += 1
+        if self.arrivals <= 2:
+            if self.arrivals == 2:
+                self.met.set()
+            try:
+                await asyncio.wait_for(self.met.wait(), timeout=MEET_WITHIN)
+            except TimeoutError:
+                pass
+        return await super().head(key)
+
+
+async def _attach_places(database, store, keys) -> list[int]:
+    async with database.transaction() as session:
+        images = await attach_many(
+            session,
+            store,
+            object_keys=keys,
+            resource_type=ImageResourceType.PLACE_IMAGE,
+            current_image_ids=(),
+            max_bytes=MAX_BYTES,
+        )
+        return [image.id for image in images]
+
+
+async def test_reversed_arrays_conflict_instead_of_deadlocking(database) -> None:
+    """같은 두 이미지를 반대 순서로 연결해도 교착 없이 한쪽만 409다."""
+    store = MeetingStore()
+    async with database.transaction() as session:
+        for key in PLACE_KEYS:
+            put_object(store, key, body=WEBP, content_type="image/webp")
+            session.add(
+                Image(
+                    s3_key=key,
+                    resource_type=ImageResourceType.PLACE_IMAGE,
+                    content_type=ImageContentType.WEBP,
+                    declared_size=len(WEBP),
+                    status=ImageStatus.UPLOADING,
+                )
+            )
+
+    forward, backward = await asyncio.gather(
+        _attach_places(database, store, list(PLACE_KEYS)),
+        _attach_places(database, store, list(reversed(PLACE_KEYS))),
+        return_exceptions=True,
+    )
+
+    outcomes = [forward, backward]
+    errors = [outcome for outcome in outcomes if isinstance(outcome, BaseException)]
+    assert len(errors) == 1
+    assert isinstance(errors[0], ApiError)
+    assert errors[0].code is ErrorCode.IMAGE_ALREADY_ATTACHED
+
+
+async def test_attach_many_returns_images_in_request_order(database) -> None:
+    """잠금 순서와 무관하게 반환 순서는 요청 배열을 따른다."""
+    store = FakeObjectStore()
+    keys = list(reversed(PLACE_KEYS))
+    async with database.transaction() as session:
+        for key in PLACE_KEYS:
+            put_object(store, key, body=WEBP, content_type="image/webp")
+            session.add(
+                Image(
+                    s3_key=key,
+                    resource_type=ImageResourceType.PLACE_IMAGE,
+                    content_type=ImageContentType.WEBP,
+                    declared_size=len(WEBP),
+                    status=ImageStatus.UPLOADING,
+                )
+            )
+
+    async with database.transaction() as session:
+        attached = await attach_many(
+            session,
+            store,
+            object_keys=keys,
+            resource_type=ImageResourceType.PLACE_IMAGE,
+            current_image_ids=(),
+            max_bytes=MAX_BYTES,
+        )
+
+    assert [image.s3_key for image in attached] == keys
