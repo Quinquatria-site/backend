@@ -3,7 +3,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Query
-from sqlalchemy import ColumnElement, Select, and_, func, select
+from sqlalchemy import Select, and_, func, select
 from sqlalchemy.dialects.postgresql import aggregate_order_by
 
 from common.errors import ApiError, ErrorCode, ErrorResponse
@@ -66,9 +66,19 @@ def _select_places() -> Select:
     ).select_from(Place.__table__.outerjoin(images, images.c.place_id == Place.id))
 
 
-def _assigned() -> ColumnElement[bool]:
-    """카테고리가 아직 없는 장소는 좌표만 둔 빈 자리라 노출하지 않는다 (명세 §3.3)."""
-    return Place.category_id.is_not(None)
+def _with_translation(statement: Select, language_code: str) -> Select:
+    """요청 언어 번역을 외부 조인한다.
+
+    좌표만 입력된 장소도 지도에 빈 마커로 보여야 하므로, 번역이 없으면 행을
+    빼지 않고 번역 필드를 `null`로 둔다 (명세 §3.3).
+    """
+    return statement.outerjoin(
+        PlaceTranslation,
+        and_(
+            PlaceTranslation.place_id == Place.id,
+            PlaceTranslation.language_code == language_code,
+        ),
+    )
 
 
 @router.get("/categories")
@@ -100,10 +110,11 @@ async def list_places(
         return Page(items=[], page=query.page, size=query.size, total=0)
 
     statement = (
-        _select_places()
-        .join(PlaceTranslation, PlaceTranslation.place_id == Place.id)
-        .where(PlaceTranslation.language_code == query.language_code.value, _assigned())
-        .order_by(Place.category_id, Place.category_sequence, Place.id)
+        _with_translation(_select_places(), query.language_code.value)
+        # 카테고리가 아직 없는 빈 마커는 맨 뒤다.
+        .order_by(
+            Place.category_id.asc().nulls_last(), Place.category_sequence, Place.id
+        )
     )
     if query.category_id is not None:
         statement = statement.where(Place.category_id == query.category_id)
@@ -120,21 +131,13 @@ async def get_place(
         raise ApiError(ErrorCode.RESOURCE_NOT_FOUND)
 
     result = await session.execute(
-        _select_places()
-        .outerjoin(
-            PlaceTranslation,
-            and_(
-                PlaceTranslation.place_id == Place.id,
-                PlaceTranslation.language_code == query.language_code.value,
-            ),
+        _with_translation(_select_places(), query.language_code.value).where(
+            Place.id == place_id
         )
-        .where(Place.id == place_id, _assigned())
     )
     place = result.mappings().one_or_none()
     if place is None:
         raise ApiError(ErrorCode.RESOURCE_NOT_FOUND)
-    if place["language_code"] is None:
-        raise ApiError(ErrorCode.TRANSLATION_NOT_FOUND)
 
     menus = await session.execute(
         select(

@@ -30,19 +30,20 @@ class MenuResponse(BaseModel):
 
 
 class PlaceResponse(BaseModel):
+    """좌표만 있는 장소도 빈 마커로 내보낸다. 아직 채우지 않은 값은 `null`이다."""
+
     id: ResourceId
-    category_id: ResourceId
-    category_sequence: int
+    category_id: ResourceId | None
+    category_sequence: int | None
     x: float
     y: float
-    # 카테고리가 없는 장소는 조회에서 빠지므로 운영 시간만 비어 있을 수 있다.
     start_hour: AwareDatetime | None
     end_hour: AwareDatetime | None
     place_image_uri: list[str] | None
-    language_code: LanguageCode
-    name: str
-    host_college: str
-    description: str
+    language_code: LanguageCode | None
+    name: str | None
+    host_college: str | None
+    description: str | None
 
 
 class PlaceDetailResponse(PlaceResponse):

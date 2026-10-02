@@ -2,7 +2,7 @@
 
 | 항목              | 값                           |
 | ----------------- | ---------------------------- |
-| 문서 버전         | v0.4                         |
+| 문서 버전         | v0.5                         |
 | 작성일            | 2026-09-09                   |
 | 최종 수정일       | 2026-10-02                   |
 | 기준 문서         | [PRD](./PRD.md)              |
@@ -118,6 +118,9 @@ Customer API의 모든 조회 요청은 `language_code` query parameter를
 - 요청 언어 번역이 없는 리소스는 목록에서 제외한다.
 - 단건 리소스에 요청 언어 번역이 없으면 기본 행이 존재하더라도
   `404 TRANSLATION_NOT_FOUND`를 반환한다.
+- 장소는 위 두 규칙의 예외다. 지도 마커는 번역 없이도 보여야 하므로,
+  번역이 없는 장소도 목록과 단건 조회에 포함하고 번역 필드를 `null`로
+  반환한다(3.3).
 - 장소 상세에 포함된 메뉴 중 요청 언어 번역이 없는 메뉴는 `menus`에서
   제외한다.
 - 다른 언어로 자동 fallback하지 않는다.
@@ -258,29 +261,37 @@ Customer 카테고리 응답 필드는 다음과 같다.
 | `language_code` | string enum | 아니요 | 기본값 `KO`                 |
 | `category_id`   | integer     | 아니요 | 해당 카테고리의 장소만 조회 |
 
-정렬은 `category_id ASC, category_sequence ASC, id ASC`다.
+정렬은 `category_id ASC, category_sequence ASC, id ASC`이며
+`category_id`가 `null`인 장소는 맨 뒤에 놓인다.
 
-카테고리가 아직 배정되지 않은 장소(`category_id`가 `null`)는 Customer
-API에 노출하지 않는다. 목록에서 제외하고, 단건 조회는
-`404 RESOURCE_NOT_FOUND`다. 카테고리 배정 여부를 번역 유무보다 먼저
-판정한다. 장소 생성 흐름은 5.4에 있다.
+좌표만 입력된 장소도 지도에 빈 마커로 보여야 한다. 그래서 장소는
+카테고리·운영 시간·번역 유무와 관계없이 모두 반환한다. 아직 채우지 않은
+값은 `null`이며, 운영자가 Backoffice `PATCH`로 채우면 같은 마커에
+반영된다. 장소 생성 흐름은 5.4에 있다.
+
+- 요청 언어 번역이 없으면 `language_code`, `name`, `host_college`,
+  `description`이 모두 `null`이다. 다른 언어로 fallback하지 않는다.
+- 단건 조회는 장소가 없을 때만 `404 RESOURCE_NOT_FOUND`다.
+  `TRANSLATION_NOT_FOUND`는 반환하지 않는다.
+- `category_id` filter를 주면 그 카테고리의 장소만 반환하므로 카테고리 없는
+  장소는 빠진다.
 
 장소 목록 항목은 다음 필드를 반환한다.
 
 | 필드                | 타입                    | 설명                                                                |
 | ------------------- | ----------------------- | ------------------------------------------------------------------- |
 | `id`                | integer                 | 장소 ID                                                             |
-| `category_id`       | integer                 | 카테고리 ID                                                         |
-| `category_sequence` | integer                 | 카테고리 내 표시 순서                                               |
+| `category_id`       | integer \| null         | 카테고리 ID, 아직 없으면 `null`                                     |
+| `category_sequence` | integer \| null         | 카테고리 내 표시 순서, 아직 없으면 `null`                           |
 | `x`                 | number                  | 지도 x 좌표                                                         |
 | `y`                 | number                  | 지도 y 좌표                                                         |
 | `start_hour`        | datetime string \| null | 운영 시작 시각, 운영 시간이 없는 장소는 `null`                      |
 | `end_hour`          | datetime string \| null | 운영 종료 시각, 운영 시간이 없는 장소는 `null`                      |
 | `place_image_uri`   | string[] \| null        | `PLACE_IMAGE` 업로드로 받은 object key 목록, 이미지가 없으면 `null` |
-| `language_code`     | string enum             | 반환된 번역 언어                                                    |
-| `name`              | string                  | 장소명                                                              |
-| `host_college`      | string                  | 주최 단과대                                                         |
-| `description`       | string                  | 장소 또는 부스 설명                                                 |
+| `language_code`     | string enum \| null     | 반환된 번역 언어, 요청 언어 번역이 없으면 `null`                    |
+| `name`              | string \| null          | 장소명, 요청 언어 번역이 없으면 `null`                              |
+| `host_college`      | string \| null          | 주최 단과대, 요청 언어 번역이 없으면 `null`                         |
+| `description`       | string \| null          | 장소 또는 부스 설명, 요청 언어 번역이 없으면 `null`                 |
 
 #### GET `/api/v1/places/{place_id}`
 
@@ -1047,9 +1058,9 @@ DB migration이 아래 행과 번역을 미리 입력하며, Backoffice API로 �
 - `POST`의 `translations`를 보낼 때는 5.2의 규칙대로 `KO` 번역을 정확히
   1개 포함해야 한다. 생략하면 번역 없는 장소가 만들어지고, 이후 `PATCH`로
   언어별 번역을 추가한다.
-- 카테고리가 없는 장소는 Backoffice에서만 보이고 Customer API에는
-  노출되지 않는다(3.3). Backoffice 목록 정렬에서 `category_id`가 `null`인
-  장소는 맨 뒤에 놓인다.
+- 좌표만 있는 장소도 Customer API에 빈 마커로 바로 노출된다(3.3).
+  Backoffice와 Customer 목록 모두 `category_id`가 `null`인 장소를 맨 뒤에
+  둔다.
 
 `end_hour`가 `start_hour`보다 이르면 `422 VALIDATION_ERROR`다. 두 값이
 같은 것은 허용한다. 존재하지 않는 `category_id`는
@@ -1633,8 +1644,8 @@ migration이 입력하며, 배포 시 migration 단계에서 함께 반영된다
 5. 모든 Customer 단건 조회는 선택 query인 `language_code`만 지원하고
    생략 시 `KO`를 사용한다. 목록 전용 query를 전달하면
    `422 VALIDATION_ERROR`다.
-6. 요청 언어 번역이 없는 항목은 목록에서 제외되고 단건 조회는
-   `404 TRANSLATION_NOT_FOUND`다.
+6. 장소를 제외하고, 요청 언어 번역이 없는 항목은 목록에서 제외되고 단건
+   조회는 `404 TRANSLATION_NOT_FOUND`다.
 7. Backoffice 단건 조회는 query parameter를 받지 않고 존재하는 모든
    번역과 각 번역의 ID, FK를 반환한다.
 8. Place를 제외한 모든 기본 리소스 생성 요청은 `KO` 번역을 정확히 1개
@@ -1713,8 +1724,10 @@ migration이 입력하며, 배포 시 migration 단계에서 함께 반영된다
 43. 요청 반영 후 `category_id`와 `category_sequence` 중 하나만, 또는
     `start_hour`와 `end_hour` 중 하나만 값이 남으면
     `422 VALIDATION_ERROR`다.
-44. 카테고리가 없는 장소는 Customer 장소 목록에서 빠지고 단건 조회는
-    `404 RESOURCE_NOT_FOUND`다. Backoffice 목록에는 맨 뒤에 포함된다.
+44. 좌표만 있는 장소는 Customer 장소 목록과 단건 조회에 포함되며,
+    카테고리·구역 번호·운영 시간·번역 필드는 `null`이다. 목록에서는 맨 뒤에
+    놓인다. 요청 언어 번역이 없는 장소도 `404`가 아니라 번역 필드가 `null`인
+    `200`이다.
 45. 카테고리가 없는 장소는 여러 개 있어도 구역 번호 중복으로 보지 않는다.
 46. migration 직후 Category는 5.3 표의 6개 행과 각 KO·EN·CHN 번역을
     가지며, `PATCH`로 `code`를 보내면 `422 VALIDATION_ERROR`다.
