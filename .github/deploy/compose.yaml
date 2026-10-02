@@ -9,9 +9,16 @@ services:
               format: raw
         ports: ['127.0.0.1:8001:8000']
         restart: unless-stopped
+        # 로그는 CloudWatch Logs로 보낸다. 스트림은 컨테이너 이름별로 나뉜다.
+        # non-blocking이라 CloudWatch가 느려도 앱이 멈추지 않고, 버퍼가 차면 로그를 버린다.
         logging: &logging
-            driver: json-file
-            options: { max-size: '20m', max-file: '5' }
+            driver: awslogs
+            options:
+                awslogs-region: ap-northeast-2
+                awslogs-group: /quinquatria/prod
+                tag: '{{.Name}}'
+                mode: non-blocking
+                max-buffer-size: 4m
 
     backoffice:
         image: ${IMAGE_REGISTRY:?}/quinquatria-backoffice:${IMAGE_TAG:?}
