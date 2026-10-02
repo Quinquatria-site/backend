@@ -21,9 +21,9 @@ from quinquatria_persistence import (
 pytestmark = pytest.mark.asyncio
 
 
-def category(name="주점"):
+def category(name="주점", code=CategoryCode.PUB):
     return Category(
-        code=CategoryCode.PUB,
+        code=code,
         translations=[CategoryTranslation(language_code=LanguageCode.KO, name=name)],
     )
 
@@ -148,9 +148,10 @@ async def test_concurrent_operations_use_independent_sessions_and_transactions(
     ready = asyncio.Queue()
     release = asyncio.Event()
 
-    async def create_resource(name):
+    async def create_resource(name, code):
+        # 코드가 같으면 unique 검사로 두 번째가 첫 번째 commit을 기다린다.
         async with database.transaction() as session:
-            session.add(category(name))
+            session.add(category(name, code))
             await session.flush()
             backend_id = await session.scalar(text("SELECT pg_backend_pid()"))
             assert await session.scalar(text("SELECT count(*) FROM category")) == 1
@@ -159,8 +160,8 @@ async def test_concurrent_operations_use_independent_sessions_and_transactions(
 
     async with asyncio.timeout(15):
         async with asyncio.TaskGroup() as tasks:
-            tasks.create_task(create_resource("첫 번째"))
-            tasks.create_task(create_resource("두 번째"))
+            tasks.create_task(create_resource("첫 번째", CategoryCode.PUB))
+            tasks.create_task(create_resource("두 번째", CategoryCode.BOOTH))
             first, second = await ready.get(), await ready.get()
             assert first[0] is not second[0]
             assert first[1] != second[1]

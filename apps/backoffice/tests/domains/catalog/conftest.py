@@ -16,6 +16,13 @@ from backoffice.config import get_settings
 from backoffice.main import create_app
 
 from ..._auth import SIGNING_KEY
+from ._helpers import seed_categories
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def categories(database) -> None:
+    """migration이 넣는 고정 카테고리를 비운 DB에 다시 둔다."""
+    await seed_categories(database)
 
 
 @pytest_asyncio.fixture

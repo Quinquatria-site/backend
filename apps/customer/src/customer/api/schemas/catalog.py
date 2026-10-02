@@ -35,8 +35,9 @@ class PlaceResponse(BaseModel):
     category_sequence: int
     x: float
     y: float
-    start_hour: AwareDatetime
-    end_hour: AwareDatetime
+    # 카테고리가 없는 장소는 조회에서 빠지므로 운영 시간만 비어 있을 수 있다.
+    start_hour: AwareDatetime | None
+    end_hour: AwareDatetime | None
     place_image_uri: list[str] | None
     language_code: LanguageCode
     name: str

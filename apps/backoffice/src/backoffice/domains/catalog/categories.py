@@ -1,11 +1,14 @@
-"""카테고리 CRUD (명세 §5.3, §6)."""
+"""카테고리 조회·수정 (명세 §5.3).
+
+카테고리는 migration이 넣는 고정 목록이라 생성·삭제 경로를 두지 않는다.
+"""
 
 from collections.abc import Sequence
 from http import HTTPStatus
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Response
-from sqlalchemy import delete, exists, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -13,21 +16,19 @@ from backoffice.auth.dependencies import ObjectStoreDep, SessionDep, SettingsDep
 from backoffice.crud.images import image_keys, replace_image
 from backoffice.crud.resources import get_or_404, paginate
 from backoffice.crud.translations import delete_translation, upsert_translations
-from backoffice.domains.catalog.common import detach_images, no_content
+from backoffice.domains.catalog.common import no_content
 from backoffice.domains.catalog.schemas import (
-    CategoryCreate,
     CategoryOut,
     CategoryPatch,
     CategoryTranslationOut,
     by_language,
 )
 from backoffice.revalidation.events import RevalidationTag, mark_changed
-from common.errors import ApiError, ErrorCode, ErrorDetail
 from common.pagination import Page
 from common.query import NoQuery, PageQuery
 from common.types import ResourceId
 from quinquatria_persistence.enums import CategoryCode, ImageResourceType, LanguageCode
-from quinquatria_persistence.models import Category, CategoryTranslation, Place
+from quinquatria_persistence.models import Category, CategoryTranslation
 
 router = APIRouter(prefix="/categories")
 
@@ -47,35 +48,6 @@ def _out(category: Category, keys: dict[int, str]) -> CategoryOut:
 async def _respond(session: AsyncSession, category: Category) -> CategoryOut:
     await session.flush()
     return _out(category, await image_keys(session, [category.image_id]))
-
-
-@router.post("", status_code=HTTPStatus.CREATED)
-async def create_category(
-    body: CategoryCreate,
-    query: Annotated[NoQuery, Query()],
-    session: SessionDep,
-    store: ObjectStoreDep,
-    settings: SettingsDep,
-) -> CategoryOut:
-    image_id = await replace_image(
-        session,
-        store,
-        current_image_id=None,
-        object_key=body.category_icon_uri,
-        resource_type=ImageResourceType.CATEGORY_ICON,
-        max_bytes=settings.max_image_bytes,
-    )
-    category = Category(
-        code=body.code,
-        image_id=image_id,
-        translations=[
-            CategoryTranslation(**item.model_dump()) for item in body.translations
-        ],
-    )
-    session.add(category)
-    result = await _respond(session, category)
-    mark_changed(session, RevalidationTag.CATEGORIES)
-    return result
 
 
 @router.patch("/{category_id}")
@@ -104,8 +76,6 @@ async def update_category(
             resource_type=ImageResourceType.CATEGORY_ICON,
             max_bytes=settings.max_image_bytes,
         )
-    if body.code is not None:
-        category.code = body.code
     if body.translations is not None:
         upsert_translations(
             category.translations, body.translations, CategoryTranslation
@@ -113,35 +83,6 @@ async def update_category(
     result = await _respond(session, category)
     mark_changed(session, RevalidationTag.CATEGORIES)
     return result
-
-
-@router.delete("/{category_id}", status_code=HTTPStatus.NO_CONTENT)
-async def delete_category(
-    category_id: ResourceId, query: Annotated[NoQuery, Query()], session: SessionDep
-) -> Response:
-    """카테고리 행을 `FOR UPDATE`로 잠근 뒤 장소 유무를 본다.
-
-    장소 생성·이동은 카테고리를 `FOR KEY SHARE`로 잠그므로, 확인과 삭제 사이에
-    장소가 끼어들 수 없다.
-    """
-    category = await get_or_404(session, Category, category_id, for_update=True)
-    has_places = await session.scalar(
-        select(exists().where(Place.category_id == category.id))
-    )
-    if has_places:
-        raise ApiError(
-            ErrorCode.DELETE_CONFLICT,
-            message="장소가 연결된 카테고리는 삭제할 수 없습니다.",
-            details=[
-                ErrorDetail(
-                    field="category_id", reason="연결된 장소를 먼저 삭제해야 합니다."
-                )
-            ],
-        )
-    await detach_images(session, [category.image_id])
-    await session.execute(delete(Category).where(Category.id == category.id))
-    mark_changed(session, RevalidationTag.CATEGORIES)
-    return no_content()
 
 
 @router.delete(

@@ -1,4 +1,4 @@
-"""현재 구현된 12개 카탈로그 쓰기가 커밋 뒤 정확한 ISR 태그를 보낸다."""
+"""카탈로그 쓰기 10개가 커밋 뒤 정확한 ISR 태그를 보낸다 (명세 §7.1)."""
 
 import asyncio
 from collections.abc import AsyncIterator
@@ -19,16 +19,15 @@ from backoffice.config import get_settings
 from backoffice.main import create_app
 from backoffice.revalidation.events import RevalidationTag
 from backoffice.revalidation.sender import RevalidationSender
-from quinquatria_persistence.models import Category
+from quinquatria_persistence.models import Place
 
 from ..._auth import SIGNING_KEY
 from ._helpers import (
-    category_body,
-    create_category,
     create_menu,
     create_place,
     menu_body,
     place_body,
+    seeded_category,
 )
 
 
@@ -73,10 +72,6 @@ async def webhook_api(
         yield client, sender
 
 
-_CATEGORY_TRANSLATIONS = [
-    {"language_code": "KO", "name": "주점"},
-    {"language_code": "EN", "name": "Pub"},
-]
 _PLACE_TRANSLATIONS = [
     {"language_code": "KO", "name": "주점", "host_college": "통번역대학"},
     {"language_code": "EN", "name": "Pub", "host_college": "College"},
@@ -87,24 +82,37 @@ _MENU_TRANSLATIONS = [
 ]
 
 
-@pytest.mark.parametrize("resource", ["categories", "places", "menus"])
-@pytest.mark.parametrize("mutation", ["create", "patch", "delete", "translation"])
+_COORDINATES = {"x": 127.42, "y": 36.18}
+"""좌표만 있는 장소 생성. 다른 리소스 없이 만들 수 있는 가장 작은 쓰기다."""
+
+_MUTATIONS = ("create", "patch", "delete", "translation")
+
+
+@pytest.mark.parametrize(
+    ("resource", "mutation"),
+    [
+        # 카테고리는 고정 목록이라 생성·삭제가 없다 (명세 §5.1).
+        ("categories", "patch"),
+        ("categories", "translation"),
+        *[
+            (resource, mutation)
+            for resource in ("places", "menus")
+            for mutation in _MUTATIONS
+        ],
+    ],
+)
 async def test_each_real_catalog_write_emits_one_correct_tag(
     webhook_api, resource, mutation
 ) -> None:
     client, sender = webhook_api
 
     if resource == "categories":
-        created = (
-            await create_category(client, translations=_CATEGORY_TRANSLATIONS)
-            if mutation != "create"
-            else None
-        )
-        body = category_body(translations=_CATEGORY_TRANSLATIONS)
-        patch = {"code": "BOOTH"}
+        created = await seeded_category(client)
+        body = None
+        patch = {"translations": [{"language_code": "EN", "name": "Bar"}]}
         tag = RevalidationTag.CATEGORIES
     elif resource == "places":
-        category = await create_category(client)
+        category = await seeded_category(client)
         created = (
             await create_place(client, category["id"], translations=_PLACE_TRANSLATIONS)
             if mutation != "create"
@@ -114,7 +122,7 @@ async def test_each_real_catalog_write_emits_one_correct_tag(
         patch = {"x": 128.0}
         tag = RevalidationTag.PLACES
     else:
-        category = await create_category(client)
+        category = await seeded_category(client)
         place = await create_place(client, category["id"])
         created = (
             await create_menu(client, place["id"], translations=_MENU_TRANSLATIONS)
@@ -146,20 +154,22 @@ async def test_each_real_catalog_write_emits_one_correct_tag(
 
 async def test_reads_and_rejected_writes_do_not_revalidate(webhook_api) -> None:
     client, sender = webhook_api
-    category = await create_category(client)
+    category = await seeded_category(client)
     sender.tags.clear()
 
     read = await client.get(f"/api/v1/categories/{category['id']}")
-    missing = await client.patch("/api/v1/categories/999", json={"code": "BOOTH"})
+    missing = await client.patch(
+        "/api/v1/categories/999", json={"category_icon_uri": None}
+    )
     rejected = await client.delete(
         f"/api/v1/categories/{category['id']}/translations/KO"
     )
+    created = await client.post("/api/v1/categories", json={"code": "PUB"})
+    deleted = await client.delete(f"/api/v1/categories/{category['id']}")
 
-    assert (read.status_code, missing.status_code, rejected.status_code) == (
-        200,
-        404,
-        409,
-    )
+    assert [
+        response.status_code for response in (read, missing, rejected, created, deleted)
+    ] == [200, 404, 409, 405, 405]
     assert sender.tags == []
 
 
@@ -184,7 +194,7 @@ async def test_commit_precedes_response_and_outbound_waits_until_after_body(
         async def send_automatic(self, tag):
             async with database.session() as reader:
                 visible_rows.append(
-                    await reader.scalar(select(func.count()).select_from(Category))
+                    await reader.scalar(select(func.count()).select_from(Place))
                 )
             trace.append("outbound_started")
             outbound_started.set()
@@ -210,9 +220,7 @@ async def test_commit_precedes_response_and_outbound_waits_until_after_body(
         base_url="http://test",
         headers=_auth_headers(),
     ) as client:
-        pending = asyncio.create_task(
-            client.post("/api/v1/categories", json=category_body())
-        )
+        pending = asyncio.create_task(client.post("/api/v1/places", json=_COORDINATES))
         try:
             await asyncio.wait_for(outbound_started.wait(), timeout=5)
             assert trace == [
@@ -246,12 +254,12 @@ async def test_handler_rollback_never_sends(settings, database, object_store) ->
         base_url="http://test",
         headers=_auth_headers(),
     ) as client:
-        response = await client.post("/api/v1/categories", json=category_body())
+        response = await client.post("/api/v1/places", json=_COORDINATES)
 
     assert response.status_code == 500
     assert sender.tags == []
     async with database.session() as reader:
-        assert await reader.scalar(select(func.count()).select_from(Category)) == 0
+        assert await reader.scalar(select(func.count()).select_from(Place)) == 0
 
 
 async def test_deferred_constraint_commit_failure_rolls_back_and_never_sends(
@@ -266,7 +274,7 @@ async def test_deferred_constraint_commit_failure_rolls_back_and_never_sends(
                 async with database.transaction() as session:
                     yield session
                     # 실제 PostgreSQL의 DEFERRABLE FK를 commit 직전에 위반한다.
-                    # 임시 테이블 DDL과 Category 쓰기는 같은 transaction에 있다.
+                    # 임시 테이블 DDL과 Place 쓰기는 같은 transaction에 있다.
                     await session.execute(
                         text(
                             "CREATE TEMP TABLE isr_commit_parent "
@@ -294,14 +302,14 @@ async def test_deferred_constraint_commit_failure_rolls_back_and_never_sends(
         base_url="http://test",
         headers=_auth_headers(),
     ) as client:
-        response = await client.post("/api/v1/categories", json=category_body())
+        response = await client.post("/api/v1/places", json=_COORDINATES)
 
     assert response.status_code == 500
     assert len(commit_errors) == 1
     assert getattr(commit_errors[0].orig, "sqlstate", None) == "23503"
     assert sender.tags == []
     async with database.session() as reader:
-        assert await reader.scalar(select(func.count()).select_from(Category)) == 0
+        assert await reader.scalar(select(func.count()).select_from(Place)) == 0
 
 
 async def test_background_registration_failure_preserves_committed_write(
@@ -313,14 +321,14 @@ async def test_background_registration_failure_preserves_committed_write(
         raise RuntimeError("private-registration-detail")
 
     monkeypatch.setattr(BackgroundTasks, "add_task", reject_registration)
-    response = await client.post("/api/v1/categories", json=category_body())
+    response = await client.post("/api/v1/places", json=_COORDINATES)
 
     assert response.status_code == 201
     assert sender.tags == []
-    assert "tag=categories kind=registration_error" in caplog.text
+    assert "tag=places kind=registration_error" in caplog.text
     assert "private-registration-detail" not in caplog.text
     async with database.session() as reader:
-        assert await reader.scalar(select(func.count()).select_from(Category)) == 1
+        assert await reader.scalar(select(func.count()).select_from(Place)) == 1
 
 
 @pytest.mark.parametrize(
@@ -350,7 +358,7 @@ async def test_webhook_configuration_or_receiver_failure_preserves_crud_success(
             base_url="http://test",
             headers=_auth_headers(),
         ) as client:
-            response = await client.post("/api/v1/categories", json=category_body())
+            response = await client.post("/api/v1/places", json=_COORDINATES)
 
     assert response.status_code == 201
     if expected_log == "http_status":
@@ -364,4 +372,4 @@ async def test_webhook_configuration_or_receiver_failure_preserves_crud_success(
     assert "dummy-secret" not in caplog.text
     assert "private-response-body" not in caplog.text
     async with database.session() as reader:
-        assert await reader.scalar(select(func.count()).select_from(Category)) == 1
+        assert await reader.scalar(select(func.count()).select_from(Place)) == 1

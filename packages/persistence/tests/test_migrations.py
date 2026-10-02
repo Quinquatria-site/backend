@@ -6,11 +6,11 @@ from sqlalchemy import create_engine, inspect, text
 
 from quinquatria_persistence import Base, Database
 
-from ._data import DEFAULT_EMPTY_COLUMNS, NULLABLE_IMAGE_COLUMNS, TABLES, VALID_ROWS
+from ._data import DEFAULT_EMPTY_COLUMNS, NULLABLE_COLUMNS, TABLES, VALID_ROWS
 
 EXPECTED_ENUMS = {
     "language_code": ["CHN", "EN", "KO"],
-    "category_code": ["PUB", "BOOTH", "FOODTRUCK", "MEDI", "BRACELET"],
+    "category_code": ["PUB", "BOOTH", "FOODTRUCK", "MEDI", "TRASHCAN", "PHOTOBOOTH"],
     "performance_type": ["ARTIST", "STUDENT", "SPECIAL"],
     "notice_type": ["PERMANENT", "GENERAL"],
     "image_resource_type": [
@@ -58,7 +58,7 @@ def assert_schema(connection):
         assert set(columns) == expected_fields
         assert {
             (table, column["name"]) for column in columns.values() if column["nullable"]
-        } == {field for field in NULLABLE_IMAGE_COLUMNS if field[0] == table}
+        } == {field for field in NULLABLE_COLUMNS if field[0] == table}
         for default_table, default_column in DEFAULT_EMPTY_COLUMNS:
             if default_table == table:
                 assert columns[default_column]["default"] is not None
@@ -138,3 +138,120 @@ async def test_programmatic_migration_accepts_async_connection_bridge(
             await connection.run_sync(assert_schema)
     finally:
         await database.dispose()
+
+
+SEEDED_CATEGORIES = [
+    (1, "PUB", {"KO": "주점", "EN": "Pub", "CHN": "酒馆"}),
+    (2, "BOOTH", {"KO": "부스", "EN": "Booth", "CHN": "摊位"}),
+    (3, "FOODTRUCK", {"KO": "푸드트럭", "EN": "Food Truck", "CHN": "餐车"}),
+    (4, "MEDI", {"KO": "의무실", "EN": "Medical Room", "CHN": "医务室"}),
+    (5, "TRASHCAN", {"KO": "쓰레기통", "EN": "Trash Can", "CHN": "垃圾桶"}),
+    (6, "PHOTOBOOTH", {"KO": "포토부스", "EN": "Photo Booth", "CHN": "拍照亭"}),
+]
+"""명세 §5.3의 고정 카테고리 표."""
+
+
+def _categories(connection):
+    rows = connection.execute(
+        text(
+            "SELECT c.id, c.code::text, c.image_id, t.language_code::text, t.name "
+            "FROM category AS c JOIN category_translation AS t "
+            "ON t.category_id = c.id ORDER BY c.id, t.language_code"
+        )
+    ).all()
+    seeded = {}
+    for category_id, code, image_id, language, name in rows:
+        assert image_id is None
+        seeded.setdefault((category_id, code), {})[language] = name
+    return [(key[0], key[1], names) for key, names in seeded.items()]
+
+
+@pytest.fixture
+def migration_engine(empty_database_url, alembic_config, monkeypatch):
+    monkeypatch.setenv(
+        "DATABASE_URL", empty_database_url.render_as_string(hide_password=False)
+    )
+    engine = create_engine(empty_database_url)
+    try:
+        yield engine
+    finally:
+        engine.dispose()
+
+
+def test_upgrade_seeds_the_fixed_categories(migration_engine, alembic_config):
+    command.upgrade(alembic_config, "head")
+    with migration_engine.connect() as connection:
+        assert _categories(connection) == SEEDED_CATEGORIES
+        # 고정 id로 넣은 뒤에도 identity가 그 다음 값부터 발급해야 한다.
+        assert (
+            connection.scalar(
+                text("SELECT nextval(pg_get_serial_sequence('category', 'id'))")
+            )
+            == 7
+        )
+
+
+def test_downgrade_and_reupgrade_keeps_the_seed(migration_engine, alembic_config):
+    command.upgrade(alembic_config, "head")
+    command.downgrade(alembic_config, "-1")
+    command.upgrade(alembic_config, "head")
+    with migration_engine.connect() as connection:
+        assert _categories(connection) == SEEDED_CATEGORIES
+
+
+def test_upgrade_keeps_matching_rows_and_fills_missing_translations(
+    migration_engine, alembic_config
+):
+    command.upgrade(alembic_config, "0005_performance_date_seq")
+    with migration_engine.begin() as connection:
+        connection.execute(text("INSERT INTO category (code) VALUES ('PUB')"))
+        connection.execute(
+            text(
+                "INSERT INTO category_translation (category_id, language_code, name) "
+                "VALUES (1, 'KO', '우리 주점')"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO place (category_id, category_sequence, x, y, "
+                "start_hour, end_hour) VALUES (1, 1, 0, 0, now(), now())"
+            )
+        )
+
+    command.upgrade(alembic_config, "head")
+
+    with migration_engine.connect() as connection:
+        categories = _categories(connection)
+        assert categories[0] == (
+            1,
+            "PUB",
+            {"KO": "우리 주점", "EN": "Pub", "CHN": "酒馆"},
+        )
+        assert categories[1:] == SEEDED_CATEGORIES[1:]
+        assert connection.scalar(text("SELECT category_id FROM place")) == 1
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "INSERT INTO category (code) VALUES ('BRACELET')",
+        "INSERT INTO category (code) VALUES ('BOOTH')",
+    ],
+    ids=["removed-code", "id-code-mismatch"],
+)
+def test_upgrade_refuses_categories_that_do_not_match_the_seed(
+    migration_engine, alembic_config, statement
+):
+    """운영 데이터를 추측해 옮기지 않는다. 정리 후 다시 실행해야 한다."""
+    command.upgrade(alembic_config, "0005_performance_date_seq")
+    with migration_engine.begin() as connection:
+        connection.execute(text(statement))
+
+    with pytest.raises(Exception, match="category"):
+        command.upgrade(alembic_config, "head")
+
+    with migration_engine.connect() as connection:
+        assert (
+            connection.scalar(text("SELECT version_num FROM alembic_version"))
+            == "0005_performance_date_seq"
+        )

@@ -205,6 +205,8 @@ def test_places_query_applies_filters_before_count_and_page(
         assert "JOIN place_translation ON place_translation.place_id = place.id" in sql
         assert "place_translation.language_code = 'EN'" in sql
         assert "place.category_id = 10" in sql
+        # 카테고리 없는 장소는 노출하지 않는다 (명세 §3.3).
+        assert "place.category_id IS NOT NULL" in sql
     # 이미지 집계 안의 ORDER BY place_image.seq는 페이지 정렬이 아니다.
     assert "ORDER BY place." not in count_sql
     assert "LIMIT" not in count_sql
@@ -384,13 +386,30 @@ def test_detail_builds_left_join_and_ordered_menu_query(
     ) in place_join
     assert "place_translation.language_code = 'EN'" in place_join
     assert "place_translation.language_code" not in place_where
-    assert place_where == "place.id = 40"
+    assert place_where == "place.id = 40 AND place.category_id IS NOT NULL"
     assert "JOIN menu_translation ON menu_translation.menu_id = menu.id" in menu_sql
     assert "menu_translation.language_code = 'EN'" in menu_sql
     assert "menu.place_id = 40" in menu_sql
     assert "ORDER BY menu.id" in menu_sql
     assert "image.s3_key AS image_url" in menu_sql
     assert "LEFT OUTER JOIN image ON image.id = menu.image_id" in menu_sql
+
+
+@pytest.mark.parametrize("path", ["places", "places/40"])
+def test_place_without_hours_serializes_null_hours(
+    customer_client, mock_session, execute_result, path
+):
+    """쓰레기통처럼 운영 시간이 없는 장소도 노출한다 (명세 §3.3)."""
+    row = _place_row(40) | {"start_hour": None, "end_hour": None}
+    mock_session.scalar.return_value = 1
+    mock_session.execute.side_effect = [execute_result(row), execute_result()]
+
+    response = customer_client.get(f"/api/v1/{path}")
+
+    assert response.status_code == 200
+    body = response.json()
+    place = body["items"][0] if path == "places" else body
+    assert (place["start_hour"], place["end_hour"]) == (None, None)
 
 
 @pytest.mark.parametrize(

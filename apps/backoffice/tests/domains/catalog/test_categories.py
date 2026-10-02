@@ -1,59 +1,79 @@
-"""명세 §5.3 Category CRUD 계약."""
+"""명세 §5.3 Category 계약. 카테고리는 migration이 넣는 고정 목록이다."""
 
 import pytest
 
-from ._helpers import category_body, create_category
+from ._helpers import SEEDED_CATEGORIES, seeded_category
 
 
-async def test_create_returns_201_with_all_translations(api) -> None:
-    response = await api.post(
-        "/api/v1/categories",
-        json=category_body(
-            translations=[
-                {"language_code": "KO", "name": "주점"},
-                {"language_code": "EN", "name": "Pub"},
-            ]
-        ),
-    )
-
-    assert response.status_code == 201
-    body = response.json()
-    assert body == {
-        "id": body["id"],
-        "code": "PUB",
+def _seeded(code: str) -> dict:
+    """번역 id를 뺀 시드 카테고리. 번역은 `CHN`, `EN`, `KO` 순이다."""
+    category_id, names = SEEDED_CATEGORIES[code]
+    return {
+        "id": category_id,
+        "code": code,
         "category_icon_uri": None,
         "translations": [
             {
-                "id": body["translations"][0]["id"],
-                "category_id": body["id"],
-                "language_code": "EN",
-                "name": "Pub",
-            },
-            {
-                "id": body["translations"][1]["id"],
-                "category_id": body["id"],
-                "language_code": "KO",
-                "name": "주점",
-            },
+                "category_id": category_id,
+                "language_code": language,
+                "name": names[language],
+            }
+            for language in ("CHN", "EN", "KO")
         ],
     }
 
 
-async def test_get_returns_the_created_category(api) -> None:
-    created = await create_category(api)
+def _without_translation_ids(body: dict) -> dict:
+    return body | {
+        "translations": [
+            {key: value for key, value in row.items() if key != "id"}
+            for row in body["translations"]
+        ]
+    }
 
-    response = await api.get(f"/api/v1/categories/{created['id']}")
+
+async def test_list_returns_the_seeded_categories_in_id_order(api) -> None:
+    response = await api.get("/api/v1/categories")
 
     assert response.status_code == 200
-    assert response.json() == created
+    body = response.json()
+    assert [_without_translation_ids(item) for item in body["items"]] == [
+        _seeded(code) for code in SEEDED_CATEGORIES
+    ]
+    assert (body["page"], body["size"], body["total"]) == (1, 20, 6)
+
+
+async def test_list_filters_by_code(api) -> None:
+    response = await api.get("/api/v1/categories", params={"code": "TRASHCAN"})
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()["items"]] == [5]
+
+
+async def test_list_paginates(api) -> None:
+    response = await api.get("/api/v1/categories", params={"page": 2, "size": 4})
+
+    body = response.json()
+    assert [item["code"] for item in body["items"]] == ["TRASHCAN", "PHOTOBOOTH"]
+    assert body["total"] == 6
+
+
+@pytest.mark.parametrize("code", ["pub", "BRACELET"])
+async def test_list_rejects_unknown_code(api, code) -> None:
+    response = await api.get("/api/v1/categories", params={"code": code})
+
+    assert response.status_code == 422
+
+
+async def test_get_returns_the_seeded_category(api) -> None:
+    response = await api.get("/api/v1/categories/6")
+
+    assert response.status_code == 200
+    assert _without_translation_ids(response.json()) == _seeded("PHOTOBOOTH")
 
 
 async def test_get_rejects_query_parameters(api) -> None:
-    created = await create_category(api)
-
-    response = await api.get(
-        f"/api/v1/categories/{created['id']}", params={"language_code": "KO"}
-    )
+    response = await api.get("/api/v1/categories/1", params={"language_code": "KO"})
 
     assert response.status_code == 422
     assert response.json()["code"] == "VALIDATION_ERROR"
@@ -66,96 +86,39 @@ async def test_get_missing_category_is_404(api) -> None:
     assert response.json()["code"] == "RESOURCE_NOT_FOUND"
 
 
-async def test_list_filters_by_code_in_id_order(api) -> None:
-    first = await create_category(api, code="PUB")
-    await create_category(api, code="BOOTH")
-    third = await create_category(api, code="PUB")
-
-    response = await api.get("/api/v1/categories", params={"code": "PUB"})
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "items": [first, third],
-        "page": 1,
-        "size": 20,
-        "total": 2,
-    }
-
-
-async def test_list_paginates(api) -> None:
-    created = [await create_category(api) for _ in range(3)]
-
-    response = await api.get("/api/v1/categories", params={"page": 2, "size": 2})
-
-    assert response.json() == {
-        "items": [created[2]],
-        "page": 2,
-        "size": 2,
-        "total": 3,
-    }
-
-
-async def test_list_rejects_unknown_code(api) -> None:
-    response = await api.get("/api/v1/categories", params={"code": "pub"})
-
-    assert response.status_code == 422
-
-
 async def test_patch_upserts_translations_keeping_ids(api) -> None:
-    created = await create_category(
-        api,
-        translations=[
-            {"language_code": "KO", "name": "주점"},
-            {"language_code": "EN", "name": "Pub"},
-        ],
-    )
-    en_id, ko_id = (row["id"] for row in created["translations"])
+    before = await seeded_category(api)
+    chn_id, en_id, ko_id = (row["id"] for row in before["translations"])
 
     response = await api.patch(
-        f"/api/v1/categories/{created['id']}",
+        "/api/v1/categories/1",
         json={
-            "code": "BOOTH",
             "translations": [
-                {"language_code": "KO", "name": "부스"},
-                {"language_code": "CHN", "name": "摊位"},
-            ],
+                {"language_code": "KO", "name": "술집"},
+                {"language_code": "EN", "name": "Bar"},
+            ]
         },
     )
 
     assert response.status_code == 200
     body = response.json()
-    assert body["code"] == "BOOTH"
-    assert [(row["language_code"], row["name"]) for row in body["translations"]] == [
-        ("CHN", "摊位"),
-        ("EN", "Pub"),
-        ("KO", "부스"),
+    assert body["code"] == "PUB"
+    assert [(row["id"], row["name"]) for row in body["translations"]] == [
+        (chn_id, "酒馆"),
+        (en_id, "Bar"),
+        (ko_id, "술집"),
     ]
-    assert body["translations"][1]["id"] == en_id
-    assert body["translations"][2]["id"] == ko_id
-    assert (await api.get(f"/api/v1/categories/{created['id']}")).json() == body
-
-
-async def test_patch_without_fields_is_422(api) -> None:
-    created = await create_category(api)
-
-    response = await api.patch(f"/api/v1/categories/{created['id']}", json={})
-
-    assert response.status_code == 422
-
-
-async def test_patch_missing_category_is_404(api) -> None:
-    response = await api.patch("/api/v1/categories/999", json={"code": "PUB"})
-
-    assert response.status_code == 404
+    assert (await api.get("/api/v1/categories/1")).json() == body
 
 
 @pytest.mark.parametrize(
-    "overrides",
+    "body",
     [
-        {"code": "pub"},
-        {"id": 1},
+        {},
+        {"code": "BOOTH"},
+        {"code": "PUB"},
+        {"id": 2},
         {"translations": []},
-        {"translations": [{"language_code": "EN", "name": "Pub"}]},
         {
             "translations": [
                 {"language_code": "KO", "name": "주점"},
@@ -165,11 +128,39 @@ async def test_patch_missing_category_is_404(api) -> None:
         {"translations": [{"language_code": "KO", "name": "주점", "id": 1}]},
     ],
 )
-async def test_invalid_create_body_is_422(api, overrides) -> None:
-    response = await api.post("/api/v1/categories", json=category_body(**overrides))
+async def test_invalid_patch_body_is_422(api, body) -> None:
+    response = await api.patch("/api/v1/categories/1", json=body)
 
     assert response.status_code == 422
     assert response.json()["code"] == "VALIDATION_ERROR"
+    assert _without_translation_ids(
+        (await api.get("/api/v1/categories/1")).json()
+    ) == _seeded("PUB")
+
+
+async def test_patch_missing_category_is_404(api) -> None:
+    response = await api.patch(
+        "/api/v1/categories/999", json={"category_icon_uri": None}
+    )
+
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [("POST", "/api/v1/categories"), ("DELETE", "/api/v1/categories/1")],
+)
+async def test_create_and_delete_are_not_offered(api, method, path) -> None:
+    """고정 목록이라 생성·삭제 경로가 없다 (명세 §5.1)."""
+    response = await api.request(
+        method,
+        path,
+        json={"code": "PUB", "translations": [{"language_code": "KO", "name": "주점"}]},
+    )
+
+    assert response.status_code == 405
+    assert response.json()["code"] == "INVALID_REQUEST"
+    assert (await api.get("/api/v1/categories")).json()["total"] == 6
 
 
 async def test_requests_without_token_are_rejected(api) -> None:

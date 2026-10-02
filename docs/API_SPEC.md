@@ -2,9 +2,9 @@
 
 | 항목              | 값                           |
 | ----------------- | ---------------------------- |
-| 문서 버전         | v0.3                         |
+| 문서 버전         | v0.4                         |
 | 작성일            | 2026-09-09                   |
-| 최종 수정일       | 2026-09-23                   |
+| 최종 수정일       | 2026-10-02                   |
 | 기준 문서         | [PRD](./PRD.md)              |
 | 대상 애플리케이션 | Customer API, Backoffice API |
 | API 버전          | v1                           |
@@ -99,12 +99,12 @@ Customer API와 Backoffice API는 별도 FastAPI 애플리케이션으로 배포
 
 ### 2.3 Enum
 
-| 이름               | 허용값                                          |
-| ------------------ | ----------------------------------------------- |
-| `language_code`    | `KO`, `EN`, `CHN`                               |
-| `CATEGORY.code`    | `PUB`, `BOOTH`, `FOODTRUCK`, `MEDI`, `BRACELET` |
-| `PERFORMANCE.type` | `ARTIST`, `STUDENT`, `SPECIAL`                  |
-| `NOTICE.type`      | `PERMANENT`, `GENERAL`                          |
+| 이름               | 허용값                                                        |
+| ------------------ | ------------------------------------------------------------- |
+| `language_code`    | `KO`, `EN`, `CHN`                                             |
+| `CATEGORY.code`    | `PUB`, `BOOTH`, `FOODTRUCK`, `MEDI`, `TRASHCAN`, `PHOTOBOOTH` |
+| `PERFORMANCE.type` | `ARTIST`, `STUDENT`, `SPECIAL`                                |
+| `NOTICE.type`      | `PERMANENT`, `GENERAL`                                        |
 
 허용값은 대소문자를 구분한다. 다른 값은 `422 VALIDATION_ERROR`로
 처리한다.
@@ -260,22 +260,27 @@ Customer 카테고리 응답 필드는 다음과 같다.
 
 정렬은 `category_id ASC, category_sequence ASC, id ASC`다.
 
+카테고리가 아직 배정되지 않은 장소(`category_id`가 `null`)는 Customer
+API에 노출하지 않는다. 목록에서 제외하고, 단건 조회는
+`404 RESOURCE_NOT_FOUND`다. 카테고리 배정 여부를 번역 유무보다 먼저
+판정한다. 장소 생성 흐름은 5.4에 있다.
+
 장소 목록 항목은 다음 필드를 반환한다.
 
-| 필드                | 타입             | 설명                                                                |
-| ------------------- | ---------------- | ------------------------------------------------------------------- |
-| `id`                | integer          | 장소 ID                                                             |
-| `category_id`       | integer          | 카테고리 ID                                                         |
-| `category_sequence` | integer          | 카테고리 내 표시 순서                                               |
-| `x`                 | number           | 지도 x 좌표                                                         |
-| `y`                 | number           | 지도 y 좌표                                                         |
-| `start_hour`        | datetime string  | 운영 시작 시각                                                      |
-| `end_hour`          | datetime string  | 운영 종료 시각                                                      |
-| `place_image_uri`   | string[] \| null | `PLACE_IMAGE` 업로드로 받은 object key 목록, 이미지가 없으면 `null` |
-| `language_code`     | string enum      | 반환된 번역 언어                                                    |
-| `name`              | string           | 장소명                                                              |
-| `host_college`      | string           | 주최 단과대                                                         |
-| `description`       | string           | 장소 또는 부스 설명                                                 |
+| 필드                | 타입                    | 설명                                                                |
+| ------------------- | ----------------------- | ------------------------------------------------------------------- |
+| `id`                | integer                 | 장소 ID                                                             |
+| `category_id`       | integer                 | 카테고리 ID                                                         |
+| `category_sequence` | integer                 | 카테고리 내 표시 순서                                               |
+| `x`                 | number                  | 지도 x 좌표                                                         |
+| `y`                 | number                  | 지도 y 좌표                                                         |
+| `start_hour`        | datetime string \| null | 운영 시작 시각, 운영 시간이 없는 장소는 `null`                      |
+| `end_hour`          | datetime string \| null | 운영 종료 시각, 운영 시간이 없는 장소는 `null`                      |
+| `place_image_uri`   | string[] \| null        | `PLACE_IMAGE` 업로드로 받은 object key 목록, 이미지가 없으면 `null` |
+| `language_code`     | string enum             | 반환된 번역 언어                                                    |
+| `name`              | string                  | 장소명                                                              |
+| `host_college`      | string                  | 주최 단과대                                                         |
+| `description`       | string                  | 장소 또는 부스 설명                                                 |
 
 #### GET `/api/v1/places/{place_id}`
 
@@ -868,6 +873,11 @@ object key는 참조가 제거된 객체로 보고 아래 수명 주기 규칙�
 | DELETE | `/{resource}/{id}`                              | `204`     | 영구 삭제                         |
 | DELETE | `/{resource}/{id}/translations/{language_code}` | `204`     | 선택 언어 번역 삭제               |
 
+Category는 배포 시 미리 입력되는 고정 목록이므로(5.3) 위 경로 중
+`POST /categories`와 `DELETE /categories/{id}`를 제공하지 않는다. 두
+요청은 `405`와 `INVALID_REQUEST`를 반환한다. 목록·단건 조회, `PATCH`,
+번역 `DELETE`는 그대로 제공한다.
+
 Performance에는 위 공통 경로 외에 두 엔드포인트가 추가로 있다. 현재
 공연 중 상태를 바꾸는 `PUT /api/v1/performances/{performance_id}/live`와
 한 일차의 노출 순서를 한 번에 바꾸는
@@ -893,12 +903,15 @@ Backoffice의 `GET /{resource}/{id}` 단건 조회는 query parameter를 받지
 | Notice      | `type`            | `created_at DESC, id DESC`                       |
 | LostItem    | `is_returned`     | `created_at DESC, id DESC`                       |
 
+Place 정렬에서 `category_id`가 `null`인 장소는 맨 뒤에 놓인다.
+
 ### 5.2 생성과 수정 규칙
 
 - `POST` 요청에는 서버가 생성하는 기본 리소스 `id`, 번역 `id`,
   번역 FK, `created_at`을 포함하지 않는다.
-- 모든 `POST` 요청은 `translations` 배열을 필수로 포함해야 하며,
-  `language_code=KO` 번역이 정확히 1개 있어야 한다.
+- Place를 제외한 모든 `POST` 요청은 `translations` 배열을 필수로
+  포함해야 하며, `language_code=KO` 번역이 정확히 1개 있어야 한다.
+  Place의 `translations`는 선택이며, 보낼 때만 이 규칙을 따른다(5.4).
 - `EN`과 `CHN` 번역은 선택 사항이다.
 - 하나의 `translations` 요청 배열에 같은 `language_code`를 두 번
   포함하면 `422 VALIDATION_ERROR`다.
@@ -960,7 +973,8 @@ Content-Type: application/json
 | LostItemTranslation    | `/api/v1/lost-items/{lost_item_id}/translations/{language_code}`     |
 
 `EN`과 `CHN` 번역은 삭제할 수 있다. `KO`는 모든 기본 리소스에 필요한
-번역이므로 삭제 요청에 `409 DELETE_CONFLICT`를 반환한다. 기본 리소스나
+번역이므로 삭제 요청에 `409 DELETE_CONFLICT`를 반환한다. 번역 없이
+생성할 수 있는 Place도 한 번 저장된 `KO` 번역은 삭제할 수 없다. 기본 리소스나
 요청 언어 번역이 없으면 `404 RESOURCE_NOT_FOUND`를 반환한다. 삭제
 성공 시 빈 본문의 `204 No Content`를 반환한다.
 
@@ -968,12 +982,30 @@ Content-Type: application/json
 
 기본 리소스:
 
-| 필드                | 타입                  | POST          | PATCH               | 설명                         |
-| ------------------- | --------------------- | ------------- | ------------------- | ---------------------------- |
-| `id`                | integer               | 서버 생성     | 수정 불가           | 카테고리 ID                  |
-| `code`              | string enum           | 필수          | 선택                | 카테고리 코드                |
-| `category_icon_uri` | string \| null        | 선택          | 선택                | 아이콘 S3 key, 기본값 `null` |
-| `translations`      | CategoryTranslation[] | 필수, KO 포함 | 선택, 언어별 upsert | 전체 번역                    |
+| 필드                | 타입                  | POST    | PATCH               | 설명                         |
+| ------------------- | --------------------- | ------- | ------------------- | ---------------------------- |
+| `id`                | integer               | 미제공  | 수정 불가           | 카테고리 ID                  |
+| `code`              | string enum           | 미제공  | 수정 불가           | 카테고리 코드, 행마다 유일   |
+| `category_icon_uri` | string \| null        | 미제공  | 선택                | 아이콘 S3 key, 기본값 `null` |
+| `translations`      | CategoryTranslation[] | 미제공  | 선택, 언어별 upsert | 전체 번역                    |
+
+Category는 운영 중에 늘거나 줄지 않는 고정 목록이다. 배포 때 실행되는
+DB migration이 아래 행과 번역을 미리 입력하며, Backoffice API로 생성하거나
+삭제하지 않는다. `code`는 행마다 유일하고 `PATCH`로 바꿀 수 없다.
+`PATCH` 본문에 `id`나 `code`를 넣으면 `422 VALIDATION_ERROR`다. 아이콘과
+번역 이름만 `PATCH`로 바꾼다.
+
+| `id` | `code`       | KO       | EN           | CHN    |
+| ---- | ------------ | -------- | ------------ | ------ |
+| `1`  | `PUB`        | 주점     | Pub          | 酒馆   |
+| `2`  | `BOOTH`      | 부스     | Booth        | 摊位   |
+| `3`  | `FOODTRUCK`  | 푸드트럭 | Food Truck   | 餐车   |
+| `4`  | `MEDI`       | 의무실   | Medical Room | 医务室 |
+| `5`  | `TRASHCAN`   | 쓰레기통 | Trash Can    | 垃圾桶 |
+| `6`  | `PHOTOBOOTH` | 포토부스 | Photo Booth  | 拍照亭 |
+
+시드 `id`는 고정값이므로 프런트엔드가 상수로 써도 된다. 시드
+`category_icon_uri`는 `null`이며 아이콘은 업로드 후 `PATCH`로 연결한다.
 
 `CategoryTranslation`:
 
@@ -988,17 +1020,36 @@ Content-Type: application/json
 
 기본 리소스:
 
-| 필드                | 타입               | POST          | PATCH               | 설명                                       |
-| ------------------- | ------------------ | ------------- | ------------------- | ------------------------------------------ |
-| `id`                | integer            | 서버 생성     | 수정 불가           | 장소 ID                                    |
-| `category_id`       | integer            | 필수          | 선택                | 존재하는 카테고리 ID                       |
-| `category_sequence` | integer            | 필수          | 선택                | 1 이상, 카테고리 내에서 유일한 순서        |
-| `x`                 | number             | 필수          | 선택                | 지도 x 좌표                                |
-| `y`                 | number             | 필수          | 선택                | 지도 y 좌표                                |
-| `start_hour`        | datetime string    | 필수          | 선택                | 운영 시작 시각                             |
-| `end_hour`          | datetime string    | 필수          | 선택                | 운영 종료 시각                             |
-| `place_image_uri`   | string[] \| null   | 선택          | 선택                | 순서가 보존되는 이미지 목록, 기본값 `null` |
-| `translations`      | PlaceTranslation[] | 필수, KO 포함 | 선택, 언어별 upsert | 전체 번역                                  |
+| 필드                | 타입                    | POST      | PATCH               | 설명                                       |
+| ------------------- | ----------------------- | --------- | ------------------- | ------------------------------------------ |
+| `id`                | integer                 | 서버 생성 | 수정 불가           | 장소 ID                                    |
+| `x`                 | number                  | 필수      | 선택, `null` 불가   | 지도 x 좌표                                |
+| `y`                 | number                  | 필수      | 선택, `null` 불가   | 지도 y 좌표                                |
+| `category_id`       | integer \| null         | 선택      | 선택                | 존재하는 카테고리 ID, 기본값 `null`        |
+| `category_sequence` | integer \| null         | 선택      | 선택                | 1 이상, 카테고리 내 유일, 기본값 `null`    |
+| `start_hour`        | datetime string \| null | 선택      | 선택                | 운영 시작 시각, 기본값 `null`              |
+| `end_hour`          | datetime string \| null | 선택      | 선택                | 운영 종료 시각, 기본값 `null`              |
+| `place_image_uri`   | string[] \| null        | 선택      | 선택                | 순서가 보존되는 이미지 목록, 기본값 `null` |
+| `translations`      | PlaceTranslation[]      | 선택      | 선택, 언어별 upsert | 전체 번역, 생략 시 빈 배열                 |
+
+장소는 두 단계로 입력한다. 먼저 지도 위 위치만 정해 `x`, `y`만으로
+`POST`한다. 이 단계의 장소는 좌표만 가진 빈 자리다. 그 뒤 `PATCH`로
+카테고리(주점·부스 등), 구역 번호, 운영 시간, 번역을 채운다. 한 번에 모두
+보내는 `POST`도 허용한다.
+
+- 필드를 생략하거나 `null`로 보내면 값이 없는 상태로 저장한다. `PATCH`에서
+  `null`을 보내면 저장된 값을 지운다.
+- `category_id`와 `category_sequence`는 함께 있거나 함께 없어야 한다.
+  `start_hour`와 `end_hour`도 같다. 판정 대상은 요청 반영 후의 값이며,
+  `PATCH`로 한쪽만 보내면 저장된 나머지 값과 합쳐 판정한다. 한쪽만 값이
+  남으면 `422 VALIDATION_ERROR`이고 `details`의 `field`는 값이 빠진
+  쪽이다.
+- `POST`의 `translations`를 보낼 때는 5.2의 규칙대로 `KO` 번역을 정확히
+  1개 포함해야 한다. 생략하면 번역 없는 장소가 만들어지고, 이후 `PATCH`로
+  언어별 번역을 추가한다.
+- 카테고리가 없는 장소는 Backoffice에서만 보이고 Customer API에는
+  노출되지 않는다(3.3). Backoffice 목록 정렬에서 `category_id`가 `null`인
+  장소는 맨 뒤에 놓인다.
 
 `end_hour`가 `start_hour`보다 이르면 `422 VALIDATION_ERROR`다. 두 값이
 같은 것은 허용한다. 존재하지 않는 `category_id`는
@@ -1010,6 +1061,7 @@ Content-Type: application/json
 
 - 판정 대상은 요청 반영 후의 `(category_id, category_sequence)` 쌍이다.
   `PATCH`로 둘 중 하나만 보내면 저장된 나머지 값과 합쳐 판정한다.
+  카테고리가 없는 장소는 판정하지 않으며 여러 개가 있어도 된다.
 - 다른 장소가 이미 쓰는 쌍이면 `422 VALIDATION_ERROR`다. `details`의
   `field`는 `category_sequence`다.
 - 카테고리가 다르면 같은 번호를 쓸 수 있다.
@@ -1037,7 +1089,55 @@ Content-Type: application/json
 | `host_college`  | string      | 필수        | 포함 | 주최 단과대                            |
 | `description`   | string      | 선택        | 포함 | 장소 또는 부스 설명, 생략 시 빈 문자열 |
 
-생성 요청 예시:
+좌표만으로 생성하는 요청 예시:
+
+```json
+{
+    "x": 127.42,
+    "y": 36.18
+}
+```
+
+응답:
+
+```json
+{
+    "id": 10,
+    "category_id": null,
+    "category_sequence": null,
+    "x": 127.42,
+    "y": 36.18,
+    "start_hour": null,
+    "end_hour": null,
+    "place_image_uri": null,
+    "translations": []
+}
+```
+
+이어서 카테고리와 번역을 채우는 요청 예시:
+
+```http
+PATCH /api/v1/places/10
+```
+
+```json
+{
+    "category_id": 1,
+    "category_sequence": 3,
+    "start_hour": "2026-10-06T10:00:00+09:00",
+    "end_hour": "2026-10-06T22:00:00+09:00",
+    "translations": [
+        {
+            "language_code": "KO",
+            "name": "글로벌캠퍼스 주점",
+            "host_college": "통번역대학",
+            "description": "음식과 음료를 판매합니다."
+        }
+    ]
+}
+```
+
+모든 필드를 한 번에 보내는 생성 요청 예시:
 
 ```json
 {
@@ -1383,7 +1483,7 @@ Content-Type: application/json
 
 | 삭제 대상   | 동작                                                                                                                                                            |
 | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Category    | CategoryTranslation은 연쇄 삭제한다. Place가 하나라도 있으면 `409 DELETE_CONFLICT`다.                                                                           |
+| Category    | 고정 목록이므로 API로 삭제하지 않는다(5.1). 번역 `DELETE`만 제공한다.                                                                                           |
 | Place       | PlaceTranslation, 하위 Menu, 각 MenuTranslation을 모두 연쇄 삭제한다.                                                                                           |
 | Menu        | MenuTranslation을 연쇄 삭제한다.                                                                                                                                |
 | Performance | PerformanceTranslation을 연쇄 삭제한다. `is_live=true`였다면 live 공연이 없는 상태가 된다. 같은 일차의 남은 공연은 `seq`가 `1`부터 연속이 되도록 다시 매겨진다. |
@@ -1393,31 +1493,17 @@ Content-Type: application/json
 존재하지 않는 ID의 삭제는 `404 RESOURCE_NOT_FOUND`다. 성공한 삭제는 빈
 본문의 `204 No Content`를 반환한다.
 
-Category 삭제 충돌 예시:
-
-```json
-{
-    "code": "DELETE_CONFLICT",
-    "message": "장소가 연결된 카테고리는 삭제할 수 없습니다.",
-    "details": [
-        {
-            "field": "category_id",
-            "reason": "연결된 장소를 먼저 삭제해야 합니다."
-        }
-    ]
-}
-```
-
 ## 7. ISR 재검증
 
 ### 7.1 자동 재검증
 
 Backoffice 쓰기 transaction이 성공적으로 commit되면 백그라운드에서
-프런트엔드 수신기로 재검증을 요청한다. 연동 범위는 Category, Place, Menu,
-Notice, LostItem의 기본 리소스 `POST`, `PATCH`, `DELETE`와 번역 `DELETE`
-경로 20개, 그리고 Performance의 같은 경로 4개와 순서 변경
-`PUT /performances/reorder`, live 지정 `PUT /performances/{id}/live`까지
-26개로, Backoffice의 모든 쓰기 경로다. LostItem의 반환 처리는 `PATCH`의
+프런트엔드 수신기로 재검증을 요청한다. 연동 범위는 Place, Menu, Notice,
+LostItem의 기본 리소스 `POST`, `PATCH`, `DELETE`와 번역 `DELETE` 경로
+16개, 생성·삭제가 없는 Category의 `PATCH`와 번역 `DELETE` 2개, 그리고
+Performance의 같은 경로 4개와 순서 변경 `PUT /performances/reorder`, live
+지정 `PUT /performances/{id}/live`까지 24개로, Backoffice의 모든 쓰기
+경로다. LostItem의 반환 처리는 `PATCH`의
 `is_returned` 변경이므로 같은 경로에 포함된다.
 
 | 변경 리소스 | 프런트엔드 `tag` | 쓰기 경로 연동 |
@@ -1523,6 +1609,16 @@ ERD에는 구역 문자가 없으므로 API가 `A1`과 같은 구역 번호를 �
 바꾸므로 공연의 `(date, seq)`와 달리 deferrable로 두지 않는다. 동시 요청이
 같은 쌍을 쓰려다 제약에 걸려도 5.4대로 `422 VALIDATION_ERROR`를 반환한다.
 
+장소를 좌표만으로 먼저 만들 수 있도록 `PLACE`에서 `x`, `y`만 NOT NULL로
+두고 `category_id`, `category_sequence`, `start_hour`, `end_hour`는
+nullable로 바꾼다. `(category_id, category_sequence)`와
+`(start_hour, end_hour)`에는 둘 다 `NULL`이거나 둘 다 값이 있어야 하는 check
+제약을 둔다. 위 unique 제약은 `NULL` 쌍을 서로 다른 값으로 보므로 카테고리
+없는 장소 여러 개를 막지 않는다.
+
+`CATEGORY.code`에는 unique 제약을 둔다. 5.3의 고정 목록은 Alembic data
+migration이 입력하며, 배포 시 migration 단계에서 함께 반영된다.
+
 ## 9. 계약 검증 시나리오
 
 1. 일반 공지 목록에는 `type=GENERAL`만, 상시 공지 목록에는
@@ -1541,8 +1637,8 @@ ERD에는 구역 문자가 없으므로 API가 `A1`과 같은 구역 번호를 �
    `404 TRANSLATION_NOT_FOUND`다.
 7. Backoffice 단건 조회는 query parameter를 받지 않고 존재하는 모든
    번역과 각 번역의 ID, FK를 반환한다.
-8. 모든 기본 리소스 생성 요청은 `KO` 번역을 정확히 1개 포함하며,
-   `EN`과 `CHN`은 생략할 수 있다.
+8. Place를 제외한 모든 기본 리소스 생성 요청은 `KO` 번역을 정확히 1개
+   포함하며, `EN`과 `CHN`은 생략할 수 있다.
 9. `PATCH`에 전달한 언어는 update 또는 insert되고, 전달하지 않은
    언어의 번역과 번역 ID는 유지된다.
 10. `EN`과 `CHN` 번역은 별도 `DELETE`로 삭제할 수 있지만 `KO` 번역
@@ -1574,10 +1670,10 @@ ERD에는 구역 문자가 없으므로 API가 `A1`과 같은 구역 번호를 �
 23. 만료, 잘못된 서명, 잘못된 `iss` 또는 `aud`의 JWT는
     `401 INVALID_TOKEN`이다.
 24. Place 삭제 시 연결된 Menu와 모든 번역이 삭제된다.
-25. Place가 연결된 Category 삭제는 `409 DELETE_CONFLICT`이며 어떤 행도
-    삭제되지 않는다.
+25. `POST /categories`와 `DELETE /categories/{id}`는 `405`와
+    `INVALID_REQUEST`이며 어떤 행도 바뀌지 않는다.
 26. Backoffice의 Category, Place, Menu, Notice, Performance, LostItem
-    쓰기 경로 26개는 transaction commit 뒤 각 `categories`, `places`,
+    쓰기 경로 24개는 transaction commit 뒤 각 `categories`, `places`,
     `notices`, `performances`, `lost-items` 태그로 자동 재검증을 요청한다.
 27. 공연 목록과 상세 응답에는 `start_at`과 `end_at`이 없고 `date`,
     `seq`, `is_live`가 포함된다.
@@ -1608,3 +1704,17 @@ ERD에는 구역 문자가 없으므로 API가 `A1`과 같은 구역 번호를 �
     `422 VALIDATION_ERROR`다. 동시 요청이 겹쳐도 500이 아니라 422다.
 40. 다른 카테고리의 장소와 같은 `category_sequence`는 허용하고, 장소가
     자기 값을 다시 보내는 `PATCH`도 허용한다.
+41. `x`, `y`만 보낸 Place `POST`는 `201`이며, 응답의 `category_id`,
+    `category_sequence`, `start_hour`, `end_hour`, `place_image_uri`는
+    `null`, `translations`는 빈 배열이다. `x` 또는 `y`가 없으면
+    `422 VALIDATION_ERROR`다.
+42. 좌표만 있는 장소에 `PATCH`로 카테고리·구역 번호·운영 시간·번역을
+    채울 수 있고, `null`을 보내면 해당 값이 지워진다.
+43. 요청 반영 후 `category_id`와 `category_sequence` 중 하나만, 또는
+    `start_hour`와 `end_hour` 중 하나만 값이 남으면
+    `422 VALIDATION_ERROR`다.
+44. 카테고리가 없는 장소는 Customer 장소 목록에서 빠지고 단건 조회는
+    `404 RESOURCE_NOT_FOUND`다. Backoffice 목록에는 맨 뒤에 포함된다.
+45. 카테고리가 없는 장소는 여러 개 있어도 구역 번호 중복으로 보지 않는다.
+46. migration 직후 Category는 5.3 표의 6개 행과 각 KO·EN·CHN 번역을
+    가지며, `PATCH`로 `code`를 보내면 `422 VALIDATION_ERROR`다.

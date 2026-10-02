@@ -5,53 +5,49 @@ import json
 import pytest
 
 from ._helpers import (
-    category_body,
-    create_category,
     create_place,
     menu_body,
     place_body,
+    seeded_category,
 )
 
 EMOJI = "🎉 👨\u200d👩\u200d👧 ❤\ufe0f 🇰🇷"
 
 
-async def _post_raw(api, url: str, body: dict):
+async def _patch_raw(api, url: str, body: dict):
     # 짝 없는 서로게이트는 httpx의 json=으로 인코딩되지 않는다.
     raw = json.dumps(body, ensure_ascii=True).encode()
-    return await api.post(
+    return await api.patch(
         url, content=raw, headers={"Content-Type": "application/json"}
     )
 
 
-async def test_category_name_is_trimmed(api) -> None:
-    created = await create_category(
-        api, translations=[{"language_code": "KO", "name": "  주점\u3000"}]
-    )
+def _names(name: str) -> dict:
+    return {"translations": [{"language_code": "KO", "name": name}]}
 
-    assert created["translations"][0]["name"] == "주점"
+
+async def test_category_name_is_trimmed(api) -> None:
+    updated = await seeded_category(api, **_names("  우리 주점" + chr(0x3000)))
+
+    assert updated["translations"][2]["name"] == "우리 주점"
 
 
 @pytest.mark.parametrize("name", ["", "   ", "주\x00점", "주\n점"])
 async def test_category_rejects_invalid_name(api, name) -> None:
-    response = await api.post(
-        "/api/v1/categories",
-        json=category_body(translations=[{"language_code": "KO", "name": name}]),
-    )
+    response = await api.patch("/api/v1/categories/1", json=_names(name))
 
     assert response.status_code == 422
     assert response.json()["code"] == "VALIDATION_ERROR"
 
 
 async def test_category_rejects_lone_surrogate(api) -> None:
-    body = category_body(translations=[{"language_code": "KO", "name": "\ud83d"}])
-
-    response = await _post_raw(api, "/api/v1/categories", body)
+    response = await _patch_raw(api, "/api/v1/categories/1", _names("\ud83d"))
 
     assert response.status_code == 422
 
 
 async def test_category_patch_rejects_blank_name(api) -> None:
-    created = await create_category(api)
+    created = await seeded_category(api)
 
     response = await api.patch(
         f"/api/v1/categories/{created['id']}",
@@ -62,7 +58,7 @@ async def test_category_patch_rejects_blank_name(api) -> None:
 
 
 async def test_place_round_trips_emoji_and_description_line_breaks(api) -> None:
-    category = await create_category(api)
+    category = await seeded_category(api)
     description = f"{EMOJI}\n둘째 줄\t탭"
     created = await create_place(
         api,
@@ -95,7 +91,7 @@ async def test_place_round_trips_emoji_and_description_line_breaks(api) -> None:
     ],
 )
 async def test_place_rejects_invalid_text(api, field, value) -> None:
-    category = await create_category(api)
+    category = await seeded_category(api)
     translation = {"language_code": "KO", "name": "주점", "host_college": "통번역대학"}
 
     response = await api.post(
@@ -108,7 +104,7 @@ async def test_place_rejects_invalid_text(api, field, value) -> None:
 
 
 async def test_menu_rejects_nul_in_description(api) -> None:
-    category = await create_category(api)
+    category = await seeded_category(api)
     place = await create_place(api, category["id"])
 
     response = await api.post(

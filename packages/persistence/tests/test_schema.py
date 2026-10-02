@@ -8,7 +8,9 @@ from ._data import (
     DEFAULT_EMPTY_COLUMNS,
     FESTIVAL_DAY,
     INSTANT,
+    NULLABLE_COLUMNS,
     NULLABLE_IMAGE_COLUMNS,
+    PLACE_PAIRS,
     TABLES,
     TRANSLATIONS,
     VALID_ROWS,
@@ -21,7 +23,7 @@ REQUIRED_COLUMNS = [
     (table, column)
     for table, values in VALID_ROWS.items()
     for column in values
-    if (table, column) not in NULLABLE_IMAGE_COLUMNS
+    if (table, column) not in NULLABLE_COLUMNS
 ] + [(table, "created_at") for table in ("notice", "lost_item")]
 
 FOREIGN_KEYS = [
@@ -164,15 +166,57 @@ async def test_place_sequence_is_unique_within_a_category(database, rows):
     )
 
     async with database.engine.begin() as connection:
-        other = await insert_row(connection, "category", VALID_ROWS["category"])
+        other = await insert_row(
+            connection, "category", {**VALID_ROWS["category"], "code": "BOOTH"}
+        )
         await insert_row(connection, "place", {**place, "category_id": other})
         await insert_row(connection, "place", {**place, "category_sequence": 2})
+
+
+@pytest.mark.parametrize("pair", PLACE_PAIRS)
+async def test_place_pairs_accept_null_together(database, rows, pair):
+    """좌표만 가진 장소를 먼저 만들고 나머지는 나중에 채운다 (명세 §5.4)."""
+    first, second = pair
+    async with database.engine.begin() as connection:
+        await connection.execute(
+            text(f"UPDATE place SET {first} = NULL, {second} = NULL WHERE id = :id"),
+            {"id": rows["place"]},
+        )
+
+
+@pytest.mark.parametrize("column", [column for pair in PLACE_PAIRS for column in pair])
+async def test_place_pairs_reject_one_side_null(database, rows, column):
+    await assert_rejected(
+        database,
+        f"UPDATE place SET {column} = NULL WHERE id = :id",
+        {"id": rows["place"]},
+        "23514",
+    )
+
+
+async def test_place_with_only_coordinates_is_accepted(database, rows):
+    async with database.engine.begin() as connection:
+        for _ in range(2):
+            await insert_row(connection, "place", {"x": 0.5, "y": -0.5})
+
+
+async def test_category_code_is_unique(database, rows):
+    await assert_rejected(
+        database,
+        "INSERT INTO category (code) VALUES (:code)",
+        {"code": VALID_ROWS["category"]["code"]},
+        "23505",
+    )
 
 
 @pytest.mark.parametrize(
     ("table", "column", "allowed"),
     [
-        ("category", "code", ["PUB", "BOOTH", "FOODTRUCK", "MEDI", "BRACELET"]),
+        (
+            "category",
+            "code",
+            ["PUB", "BOOTH", "FOODTRUCK", "MEDI", "TRASHCAN", "PHOTOBOOTH"],
+        ),
         ("performance", "type", ["ARTIST", "STUDENT", "SPECIAL"]),
         ("notice", "type", ["PERMANENT", "GENERAL"]),
         *[(table, "language_code", ["CHN", "EN", "KO"]) for table in TRANSLATIONS],
