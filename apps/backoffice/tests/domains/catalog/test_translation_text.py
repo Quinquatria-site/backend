@@ -84,7 +84,6 @@ async def test_place_round_trips_emoji_and_description_line_breaks(api) -> None:
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("host_college", " "),
         ("host_college", "대학\n이름"),
         ("description", "설명\x00"),
         ("description", "설명\x1b[31m"),
@@ -101,6 +100,41 @@ async def test_place_rejects_invalid_text(api, field, value) -> None:
 
     assert response.status_code == 422
     assert response.json()["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.parametrize(
+    "translation",
+    [
+        {"language_code": "KO"},
+        {"language_code": "KO", "name": "", "host_college": ""},
+        {"language_code": "KO", "name": "   ", "host_college": " 　"},
+    ],
+)
+async def test_place_accepts_empty_translation_text(api, translation) -> None:
+    """좌표 외에는 필수가 아니다. 빈 칸은 빈 문자열로 저장한다 (명세 §5.4)."""
+    response = await api.post(
+        "/api/v1/places", json={"x": 1.0, "y": 2.0, "translations": [translation]}
+    )
+
+    assert response.status_code == 201
+    saved = response.json()["translations"][0]
+    assert (saved["name"], saved["host_college"], saved["description"]) == ("", "", "")
+
+
+async def test_place_patch_clears_translation_text(api) -> None:
+    category = await seeded_category(api)
+    created = await create_place(api, category["id"])
+
+    response = await api.patch(
+        f"/api/v1/places/{created['id']}",
+        json={
+            "translations": [{"language_code": "KO", "name": " ", "host_college": ""}]
+        },
+    )
+
+    assert response.status_code == 200
+    saved = response.json()["translations"][0]
+    assert (saved["name"], saved["host_college"]) == ("", "")
 
 
 async def test_menu_rejects_nul_in_description(api) -> None:

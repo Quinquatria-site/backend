@@ -17,6 +17,7 @@ from pydantic import (
 from backoffice.crud.resources import POSTGRESQL_INTEGER_MAX
 from backoffice.crud.schemas import (
     CreateTranslations,
+    OptionalLine,
     OptionalText,
     PatchModel,
     PatchTranslations,
@@ -113,8 +114,10 @@ def ensure_place_rules(values: dict[str, object]) -> None:
 
 
 class PlaceTranslationIn(TranslationIn):
-    name: RequiredLine
-    host_college: RequiredLine
+    """좌표 외에는 필수가 아니다. 비운 칸은 빈 문자열로 저장한다 (명세 §5.4)."""
+
+    name: OptionalLine = ""
+    host_college: OptionalLine = ""
     description: OptionalText = ""
 
 
