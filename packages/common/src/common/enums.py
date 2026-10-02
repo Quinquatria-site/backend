@@ -18,7 +18,8 @@ class CategoryCode(StrEnum):
     BOOTH = "BOOTH"
     FOODTRUCK = "FOODTRUCK"
     MEDI = "MEDI"
-    BRACELET = "BRACELET"
+    TRASHCAN = "TRASHCAN"
+    PHOTOBOOTH = "PHOTOBOOTH"
 
 
 class PerformanceType(StrEnum):

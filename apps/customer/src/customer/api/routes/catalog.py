@@ -3,7 +3,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Query
-from sqlalchemy import Select, and_, func, select
+from sqlalchemy import ColumnElement, Select, and_, func, select
 from sqlalchemy.dialects.postgresql import aggregate_order_by
 
 from common.errors import ApiError, ErrorCode, ErrorResponse
@@ -66,6 +66,11 @@ def _select_places() -> Select:
     ).select_from(Place.__table__.outerjoin(images, images.c.place_id == Place.id))
 
 
+def _assigned() -> ColumnElement[bool]:
+    """카테고리가 아직 없는 장소는 좌표만 둔 빈 자리라 노출하지 않는다 (명세 §3.3)."""
+    return Place.category_id.is_not(None)
+
+
 @router.get("/categories")
 async def list_categories(
     query: Annotated[ListQuery, Query()], session: ReadSession
@@ -97,7 +102,7 @@ async def list_places(
     statement = (
         _select_places()
         .join(PlaceTranslation, PlaceTranslation.place_id == Place.id)
-        .where(PlaceTranslation.language_code == query.language_code.value)
+        .where(PlaceTranslation.language_code == query.language_code.value, _assigned())
         .order_by(Place.category_id, Place.category_sequence, Place.id)
     )
     if query.category_id is not None:
@@ -123,7 +128,7 @@ async def get_place(
                 PlaceTranslation.language_code == query.language_code.value,
             ),
         )
-        .where(Place.id == place_id)
+        .where(Place.id == place_id, _assigned())
     )
     place = result.mappings().one_or_none()
     if place is None:

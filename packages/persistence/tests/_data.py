@@ -92,6 +92,13 @@ NULLABLE_IMAGE_COLUMNS = {
     ("image", "detached_at"),
 }
 
+PLACE_PAIRS = (("category_id", "category_sequence"), ("start_hour", "end_hour"))
+"""좌표만 있는 장소를 위해 비울 수 있되, 둘씩 함께 비워야 하는 컬럼 (명세 §5.4)."""
+
+NULLABLE_COLUMNS = NULLABLE_IMAGE_COLUMNS | {
+    ("place", column) for pair in PLACE_PAIRS for column in pair
+}
+
 DEFAULT_EMPTY_COLUMNS = {
     ("place_translation", "description"),
     ("menu_translation", "description"),

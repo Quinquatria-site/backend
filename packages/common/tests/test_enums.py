@@ -14,7 +14,8 @@ def test_category_code_members() -> None:
         "BOOTH",
         "FOODTRUCK",
         "MEDI",
-        "BRACELET",
+        "TRASHCAN",
+        "PHOTOBOOTH",
     ]
 
 

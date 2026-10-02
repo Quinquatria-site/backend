@@ -5,7 +5,7 @@ from sqlalchemy import select
 from quinquatria_persistence.enums import ImageStatus
 from quinquatria_persistence.models import Image
 
-from ._helpers import create_category, upload
+from ._helpers import seeded_category, upload
 
 
 async def _status(database, key: str) -> ImageStatus:
@@ -13,25 +13,22 @@ async def _status(database, key: str) -> ImageStatus:
         return await session.scalar(select(Image.status).where(Image.s3_key == key))
 
 
-async def test_create_attaches_the_icon(api, database, object_store) -> None:
+async def test_patch_attaches_the_icon(api, database, object_store) -> None:
     key = await upload(api, object_store, "CATEGORY_ICON")
 
-    created = await create_category(api, category_icon_uri=key)
+    updated = await seeded_category(api, category_icon_uri=key)
 
-    assert created["category_icon_uri"] == key
+    assert updated["category_icon_uri"] == key
     assert await _status(database, key) is ImageStatus.ATTACHED
 
 
 async def test_icon_with_another_prefix_is_invalid(api, object_store) -> None:
     key = await upload(api, object_store, "MENU_IMAGE")
 
-    response = await api.post(
-        "/api/v1/categories",
-        json={
-            "code": "PUB",
-            "category_icon_uri": key,
-            "translations": [{"language_code": "KO", "name": "주점"}],
-        },
+    category = await seeded_category(api)
+
+    response = await api.patch(
+        f"/api/v1/categories/{category['id']}", json={"category_icon_uri": key}
     )
 
     assert response.status_code == 422
@@ -43,7 +40,7 @@ async def test_patch_replaces_and_detaches_the_old_icon(
 ) -> None:
     old = await upload(api, object_store, "CATEGORY_ICON")
     new = await upload(api, object_store, "CATEGORY_ICON")
-    created = await create_category(api, category_icon_uri=old)
+    created = await seeded_category(api, category_icon_uri=old)
 
     response = await api.patch(
         f"/api/v1/categories/{created['id']}", json={"category_icon_uri": new}
@@ -56,7 +53,7 @@ async def test_patch_replaces_and_detaches_the_old_icon(
 
 async def test_patch_null_detaches_the_icon(api, database, object_store) -> None:
     key = await upload(api, object_store, "CATEGORY_ICON")
-    created = await create_category(api, category_icon_uri=key)
+    created = await seeded_category(api, category_icon_uri=key)
 
     response = await api.patch(
         f"/api/v1/categories/{created['id']}", json={"category_icon_uri": None}
@@ -68,12 +65,11 @@ async def test_patch_null_detaches_the_icon(api, database, object_store) -> None
 
 async def test_failed_icon_rolls_back_every_change(api, object_store) -> None:
     """이미지 검증이 실패하면 같은 요청의 기본 필드와 번역도 남지 않는다."""
-    created = await create_category(api)
+    created = await seeded_category(api)
 
     response = await api.patch(
         f"/api/v1/categories/{created['id']}",
         json={
-            "code": "BOOTH",
             "category_icon_uri": "images/category/missing.webp",
             "translations": [{"language_code": "EN", "name": "Booth"}],
         },

@@ -1,0 +1,440 @@
+[
+  {
+    "code": "BOOTH",
+    "category_sequence": 101,
+    "x": 428,
+    "y": 879
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 102,
+    "x": 406,
+    "y": 864
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 103,
+    "x": 414,
+    "y": 818
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 104,
+    "x": 419,
+    "y": 797
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 105,
+    "x": 428,
+    "y": 774
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 106,
+    "x": 346,
+    "y": 817
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 107,
+    "x": 346,
+    "y": 789
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 108,
+    "x": 369,
+    "y": 763
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 109,
+    "x": 394,
+    "y": 763
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 110,
+    "x": 533,
+    "y": 751
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 111,
+    "x": 559,
+    "y": 750
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 112,
+    "x": 584,
+    "y": 750
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 113,
+    "x": 607,
+    "y": 750
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 205,
+    "x": 340,
+    "y": 535
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 206,
+    "x": 372,
+    "y": 535
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 207,
+    "x": 403,
+    "y": 535
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 208,
+    "x": 436,
+    "y": 535
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 209,
+    "x": 467,
+    "y": 535
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 210,
+    "x": 503,
+    "y": 535
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 301,
+    "x": 563,
+    "y": 728
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 302,
+    "x": 612,
+    "y": 728
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 303,
+    "x": 635,
+    "y": 728
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 304,
+    "x": 659,
+    "y": 728
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 305,
+    "x": 682,
+    "y": 757
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 306,
+    "x": 701,
+    "y": 757
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 307,
+    "x": 723,
+    "y": 757
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 308,
+    "x": 683,
+    "y": 731
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 309,
+    "x": 704,
+    "y": 731
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 310,
+    "x": 724,
+    "y": 731
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 311,
+    "x": 770,
+    "y": 710
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 312,
+    "x": 792,
+    "y": 731
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 401,
+    "x": 995,
+    "y": 941
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 402,
+    "x": 1029,
+    "y": 941
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 403,
+    "x": 1068,
+    "y": 941
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 404,
+    "x": 1107,
+    "y": 941
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 405,
+    "x": 1145,
+    "y": 941
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 406,
+    "x": 1200,
+    "y": 909
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 407,
+    "x": 1200,
+    "y": 868
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 408,
+    "x": 1150,
+    "y": 831
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 409,
+    "x": 1112,
+    "y": 831
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 410,
+    "x": 1067,
+    "y": 831
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 411,
+    "x": 1028,
+    "y": 831
+  },
+  {
+    "code": "BOOTH",
+    "category_sequence": 412,
+    "x": 993,
+    "y": 831
+  },
+  {
+    "code": "PUB",
+    "category_sequence": 201,
+    "x": 281,
+    "y": 679
+  },
+  {
+    "code": "PUB",
+    "category_sequence": 251,
+    "x": 281,
+    "y": 645
+  },
+  {
+    "code": "PUB",
+    "category_sequence": 202,
+    "x": 313,
+    "y": 646
+  },
+  {
+    "code": "PUB",
+    "category_sequence": 252,
+    "x": 313,
+    "y": 680
+  },
+  {
+    "code": "PUB",
+    "category_sequence": 203,
+    "x": 281,
+    "y": 605
+  },
+  {
+    "code": "PUB",
+    "category_sequence": 253,
+    "x": 281,
+    "y": 572
+  },
+  {
+    "code": "PUB",
+    "category_sequence": 204,
+    "x": 313,
+    "y": 578
+  },
+  {
+    "code": "PUB",
+    "category_sequence": 254,
+    "x": 313,
+    "y": 609
+  },
+  {
+    "code": "FOODTRUCK",
+    "category_sequence": 1,
+    "x": 766,
+    "y": 530
+  },
+  {
+    "code": "FOODTRUCK",
+    "category_sequence": 2,
+    "x": 786,
+    "y": 530
+  },
+  {
+    "code": "FOODTRUCK",
+    "category_sequence": 3,
+    "x": 807,
+    "y": 530
+  },
+  {
+    "code": "FOODTRUCK",
+    "category_sequence": 4,
+    "x": 828,
+    "y": 530
+  },
+  {
+    "code": "FOODTRUCK",
+    "category_sequence": 5,
+    "x": 850,
+    "y": 530
+  },
+  {
+    "code": "FOODTRUCK",
+    "category_sequence": 6,
+    "x": 869,
+    "y": 530
+  },
+  {
+    "code": "FOODTRUCK",
+    "category_sequence": 7,
+    "x": 890,
+    "y": 530
+  },
+  {
+    "code": "FOODTRUCK",
+    "category_sequence": 8,
+    "x": 907,
+    "y": 530
+  },
+  {
+    "code": "FOODTRUCK",
+    "category_sequence": 9,
+    "x": 927,
+    "y": 530
+  },
+  {
+    "code": "FOODTRUCK",
+    "category_sequence": 10,
+    "x": 951,
+    "y": 530
+  },
+  {
+    "code": "TRASHCAN",
+    "category_sequence": 1,
+    "x": 494,
+    "y": 791
+  },
+  {
+    "code": "TRASHCAN",
+    "category_sequence": 2,
+    "x": 326,
+    "y": 653
+  },
+  {
+    "code": "TRASHCAN",
+    "category_sequence": 3,
+    "x": 314,
+    "y": 519
+  },
+  {
+    "code": "TRASHCAN",
+    "category_sequence": 4,
+    "x": 779,
+    "y": 724
+  },
+  {
+    "code": "TRASHCAN",
+    "category_sequence": 5,
+    "x": 921,
+    "y": 766
+  },
+  {
+    "code": "TRASHCAN",
+    "category_sequence": 6,
+    "x": 958,
+    "y": 927
+  },
+  {
+    "code": "TRASHCAN",
+    "category_sequence": 7,
+    "x": 681,
+    "y": 526
+  },
+  {
+    "code": "TRASHCAN",
+    "category_sequence": 8,
+    "x": 737,
+    "y": 418
+  },
+  {
+    "code": "TRASHCAN",
+    "category_sequence": 9,
+    "x": 735,
+    "y": 200
+  },
+  {
+    "code": "PHOTOBOOTH",
+    "category_sequence": 1,
+    "x": 813,
+    "y": 757
+  },
+  {
+    "code": "PHOTOBOOTH",
+    "category_sequence": 2,
+    "x": 845,
+    "y": 757
+  },
+  {
+    "code": "PHOTOBOOTH",
+    "category_sequence": 3,
+    "x": 873,
+    "y": 757
+  }
+]

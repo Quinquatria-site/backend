@@ -1,7 +1,7 @@
 """상위 리소스 삭제와 하위 리소스 쓰기가 겹칠 때의 계약 (명세 §6).
 
 확인과 쓰기 사이에 다른 transaction이 끼어들면 FK 위반이 500으로 새어
-나간다. 잠금으로 직렬화해 뒤에 온 요청이 409나 404로 판정되어야 한다.
+나간다. 잠금으로 직렬화해 뒤에 온 요청이 404로 판정되어야 한다.
 """
 
 import asyncio
@@ -13,11 +13,11 @@ from quinquatria_persistence.enums import ImageStatus
 from quinquatria_persistence.models import Category, Image, Menu, Place
 
 from ._helpers import (
-    create_category,
     create_menu,
     create_place,
     menu_body,
     place_body,
+    seeded_category,
     upload,
 )
 
@@ -25,35 +25,8 @@ BLOCKED_FOR = 0.5
 """뒤의 요청이 잠금에 막혀 있음을 확인하는 시간."""
 
 
-async def test_category_delete_waits_for_a_pending_place(api, database) -> None:
-    category = await create_category(api)
-    at = datetime(2026, 10, 6, 1, tzinfo=UTC)
-
-    async with database.transaction() as pending:
-        pending.add(
-            Place(
-                category_id=category["id"],
-                category_sequence=1,
-                x=0.0,
-                y=0.0,
-                start_hour=at,
-                end_hour=at,
-            )
-        )
-        await pending.flush()
-        deleting = asyncio.create_task(
-            api.delete(f"/api/v1/categories/{category['id']}")
-        )
-        await asyncio.sleep(BLOCKED_FOR)
-        assert not deleting.done()
-
-    response = await deleting
-    assert response.status_code == 409
-    assert response.json()["code"] == "DELETE_CONFLICT"
-
-
 async def test_place_create_during_category_delete_is_404(api, database) -> None:
-    category = await create_category(api)
+    category = await seeded_category(api)
 
     async with database.transaction() as deleting:
         await deleting.execute(delete(Category).where(Category.id == category["id"]))
@@ -69,7 +42,7 @@ async def test_place_create_during_category_delete_is_404(api, database) -> None
 
 
 async def test_menu_create_during_place_delete_is_404(api, database) -> None:
-    category = await create_category(api)
+    category = await seeded_category(api)
     place = await create_place(api, category["id"])
 
     async with database.transaction() as deleting:
@@ -86,7 +59,7 @@ async def test_menu_create_during_place_delete_is_404(api, database) -> None:
 
 async def test_place_create_racing_for_the_same_sequence_is_422(api, database) -> None:
     """먼저 쓴 transaction이 commit되면 unique 제약 위반이 500이 아니라 422다."""
-    category = await create_category(api)
+    category = await seeded_category(api)
     at = datetime(2026, 10, 6, 1, tzinfo=UTC)
 
     async with database.transaction() as pending:
@@ -123,7 +96,7 @@ async def test_menu_delete_detaches_the_image_committed_while_waiting(
     api, database, object_store
 ) -> None:
     """메뉴 잠금을 기다리는 사이 교체된 이미지까지 해제해야 정리 대상에 오른다."""
-    category = await create_category(api)
+    category = await seeded_category(api)
     place = await create_place(api, category["id"])
     old_key = await upload(api, object_store, "MENU_IMAGE")
     new_key = await upload(api, object_store, "MENU_IMAGE")
@@ -155,7 +128,7 @@ async def test_menu_delete_detaches_the_image_committed_while_waiting(
 
 
 async def test_menu_patch_sees_the_place_committed_while_waiting(api, database) -> None:
-    category = await create_category(api)
+    category = await seeded_category(api)
     before = await create_place(api, category["id"])
     after = await create_place(api, category["id"])
     menu = await create_menu(api, before["id"])

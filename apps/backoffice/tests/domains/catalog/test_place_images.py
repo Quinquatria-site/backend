@@ -5,7 +5,7 @@ from sqlalchemy import select
 from quinquatria_persistence.enums import ImageStatus
 from quinquatria_persistence.models import Image
 
-from ._helpers import create_category, create_place, place_body, upload
+from ._helpers import create_place, place_body, seeded_category, upload
 
 
 async def _status(database, key: str) -> ImageStatus:
@@ -18,7 +18,7 @@ async def _keys(api, store, count: int) -> list[str]:
 
 
 async def test_create_preserves_image_order(api, database, object_store) -> None:
-    category = await create_category(api)
+    category = await seeded_category(api)
     keys = await _keys(api, object_store, 3)
     ordered = [keys[2], keys[0], keys[1]]
 
@@ -32,7 +32,7 @@ async def test_create_preserves_image_order(api, database, object_store) -> None
 
 
 async def test_duplicate_keys_are_invalid_image(api, object_store) -> None:
-    category = await create_category(api)
+    category = await seeded_category(api)
     [key] = await _keys(api, object_store, 1)
 
     response = await api.post(
@@ -46,7 +46,7 @@ async def test_duplicate_keys_are_invalid_image(api, object_store) -> None:
 async def test_patch_reorders_replaces_and_detaches(
     api, database, object_store
 ) -> None:
-    category = await create_category(api)
+    category = await seeded_category(api)
     a, b, c, d = await _keys(api, object_store, 4)
     place = await create_place(api, category["id"], place_image_uri=[a, b, c])
 
@@ -63,7 +63,7 @@ async def test_patch_reorders_replaces_and_detaches(
 
 
 async def test_patch_null_detaches_every_image(api, database, object_store) -> None:
-    category = await create_category(api)
+    category = await seeded_category(api)
     a, b = await _keys(api, object_store, 2)
     place = await create_place(api, category["id"], place_image_uri=[a, b])
 
@@ -79,7 +79,7 @@ async def test_patch_null_detaches_every_image(api, database, object_store) -> N
 async def test_failed_image_rolls_back_fields_and_translations(
     api, database, object_store
 ) -> None:
-    category = await create_category(api)
+    category = await seeded_category(api)
     [a] = await _keys(api, object_store, 1)
     place = await create_place(api, category["id"], place_image_uri=[a])
 

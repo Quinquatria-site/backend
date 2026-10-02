@@ -6,12 +6,12 @@ from sqlalchemy import select
 from quinquatria_persistence.enums import ImageStatus
 from quinquatria_persistence.models import Image
 
-from ._helpers import create_category, create_menu, create_place, menu_body, upload
+from ._helpers import create_menu, create_place, menu_body, seeded_category, upload
 
 
 @pytest.fixture
 async def place(api) -> dict:
-    category = await create_category(api)
+    category = await seeded_category(api)
     return await create_place(api, category["id"])
 
 

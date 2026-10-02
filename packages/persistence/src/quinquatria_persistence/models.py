@@ -116,6 +116,8 @@ class Category(_IdentityMixin, Base):
     __tablename__ = "category"
     __table_args__ = (
         CheckConstraint("id > 0", name="id_positive"),
+        # 배포 때 시드되는 고정 목록이라 코드마다 한 행이다 (명세 §5.3).
+        UniqueConstraint("code"),
         Index(None, "code", "id"),
     )
 
@@ -163,22 +165,32 @@ class Place(_IdentityMixin, Base):
         CheckConstraint("id > 0", name="id_positive"),
         CheckConstraint("category_sequence >= 1", name="category_sequence_positive"),
         CheckConstraint("end_hour >= start_hour", name="hours_ordered"),
+        # 좌표만 있는 장소를 허용하되 짝은 함께 비운다 (명세 §5.4).
+        CheckConstraint(
+            "(category_id IS NULL) = (category_sequence IS NULL)",
+            name="category_paired",
+        ),
+        CheckConstraint(
+            "(start_hour IS NULL) = (end_hour IS NULL)", name="hours_paired"
+        ),
         # 구역 번호(A1 …)가 두 장소에 붙지 않게 한다. 요청 하나가 한 행만 바꾸므로
         # `place_image`와 달리 지연하지 않는다 (명세 §5.4, §8).
         UniqueConstraint("category_id", "category_sequence"),
         Index(None, "category_id", "category_sequence", "id"),
     )
 
-    category_id: Mapped[int] = mapped_column(
+    category_id: Mapped[int | None] = mapped_column(
         ForeignKey("category.id", ondelete="RESTRICT")
     )
-    category_sequence: Mapped[int] = mapped_column(Integer)
+    category_sequence: Mapped[int | None] = mapped_column(Integer)
     x: Mapped[float] = mapped_column(Double)
     y: Mapped[float] = mapped_column(Double)
-    start_hour: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    end_hour: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    start_hour: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    end_hour: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    category: Mapped[Category] = relationship(back_populates="places", lazy="raise")
+    category: Mapped[Category | None] = relationship(
+        back_populates="places", lazy="raise"
+    )
     translations: Mapped[list[PlaceTranslation]] = relationship(
         back_populates="place",
         cascade=_OWNED_CASCADE,

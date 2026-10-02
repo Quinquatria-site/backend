@@ -26,7 +26,7 @@ from backoffice.domains.catalog.schemas import (
     PlacePatch,
     PlaceTranslationOut,
     by_language,
-    ensure_hours_ordered,
+    ensure_place_rules,
 )
 from backoffice.images.store import ObjectStore
 from backoffice.revalidation.events import RevalidationTag, mark_changed
@@ -139,8 +139,9 @@ async def create_place(
     store: ObjectStoreDep,
     settings: SettingsDep,
 ) -> PlaceOut:
-    ensure_hours_ordered(body.start_hour, body.end_hour)
-    await lock_parent(session, Category, body.category_id)
+    ensure_place_rules(body.model_dump())
+    if body.category_id is not None:
+        await lock_parent(session, Category, body.category_id)
     place = Place(
         category_id=body.category_id,
         category_sequence=body.category_sequence,
@@ -151,7 +152,7 @@ async def create_place(
         # 읽기만 한 빈 컬렉션은 저장되지 않아 flush 뒤 lazy="raise"에 걸린다.
         images=[],
         translations=[
-            PlaceTranslation(**item.model_dump()) for item in body.translations
+            PlaceTranslation(**item.model_dump()) for item in body.translations or ()
         ],
     )
     await _set_images(
@@ -178,8 +179,11 @@ async def update_place(
 ) -> PlaceOut:
     place = await get_or_404(session, Place, place_id, *_LOADED, for_update=True)
     changes = body.changes()
-    ensure_hours_ordered(
-        body.start_hour or place.start_hour, body.end_hour or place.end_hour
+    ensure_place_rules(
+        {
+            name: changes.get(name, getattr(place, name))
+            for name in ("category_id", "category_sequence", "start_hour", "end_hour")
+        }
     )
     if body.category_id is not None and body.category_id != place.category_id:
         await lock_parent(session, Category, body.category_id)
@@ -254,7 +258,10 @@ async def list_places(
     statement = (
         select(Place)
         .options(*_LOADED)
-        .order_by(Place.category_id, Place.category_sequence, Place.id)
+        # 카테고리 없는 장소는 맨 뒤다. ASC 기본값과 같아 인덱스를 그대로 탄다.
+        .order_by(
+            Place.category_id.asc().nulls_last(), Place.category_sequence, Place.id
+        )
     )
     if query.category_id is not None:
         statement = statement.where(id_equals(Place.category_id, query.category_id))

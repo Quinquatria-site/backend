@@ -10,7 +10,7 @@ uv --directory apps/backoffice run fastapi dev
 
 ## ISR 자동 재검증
 
-카테고리·장소·메뉴·공지·공연·분실물의 생성, 수정, 삭제와 번역 삭제, 그리고
+장소·메뉴·공지·공연·분실물의 생성, 수정, 삭제, 카테고리 수정, 번역 삭제, 그리고
 공연의 순서 변경과 live 지정이 DB에 commit되면 백그라운드에서 프런트엔드
 `POST {USER_SITE_URL}/api/revalidate`를 호출합니다.
 `Authorization: Bearer <REVALIDATE_SECRET>` 헤더와 `{"tag":"categories"}` 같은
@@ -28,6 +28,21 @@ uv --directory apps/backoffice run fastapi dev
 재생성 완료를 뜻하지는 않습니다. 수동 재검증 API는 아직 구현되지
 않았습니다. 태그 전체 매핑과 수신기 응답 계약은
 [API 명세](../../docs/API_SPEC.md#7-isr-재검증)를 참고합니다.
+
+## 지도 장소 시드
+
+지도에 표시할 장소의 카테고리·구역 번호·좌표를 운영 DB에 한 번 넣는다.
+운영 시간과 번역은 이후 Backoffice `PATCH`로 채운다. 카테고리는 migration
+0006이 넣으므로 `alembic upgrade head` 뒤에 실행한다.
+
+```bash
+uv run --all-packages python -m backoffice.domains.catalog.place_seed [JSON 경로]
+```
+
+경로를 생략하면 `src/backoffice/domains/catalog/data/map_places.json`을 쓴다.
+항목은 `code`(CATEGORY enum), `category_sequence`, `x`, `y`만 받는다. 파일
+전체가 한 transaction이며, 같은 구역 번호가 같은 좌표에 이미 있으면 건너뛰므로
+다시 실행해도 안전하다. 다른 좌표에 있으면 아무것도 넣지 않고 실패한다.
 
 ## 이미지 cleanup
 
