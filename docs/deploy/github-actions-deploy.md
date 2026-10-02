@@ -84,6 +84,12 @@ ECR → 리포지토리 생성으로 두 개를 만듭니다.
       "Effect": "Allow",
       "Action": ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"],
       "Resource": "arn:aws:ecr:ap-northeast-2:<account-id>:repository/quinquatria-*"
+    },
+    {
+      "Sid": "WriteContainerLogs",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
+      "Resource": "arn:aws:logs:ap-northeast-2:<account-id>:log-group:/quinquatria/prod:*"
     }
   ]
 }
@@ -91,6 +97,19 @@ ECR → 리포지토리 생성으로 두 개를 만듭니다.
 
 기본 키(`aws/ssm`)로 암호화하면 KMS 권한은 따로 필요하지 않습니다.
 `GetAuthorizationToken`은 리소스 단위 제한을 지원하지 않아 `*`를 씁니다.
+
+컨테이너 로그는 Docker의 `awslogs` 드라이버가 CloudWatch Logs로 보냅니다.
+드라이버는 컨테이너가 아니라 호스트의 Docker 데몬에서 이 role로 동작합니다.
+로그 그룹은 미리 만들고 보존 기간을 겁니다. 기본값은 영구 보관입니다.
+
+```bash
+aws logs create-log-group --log-group-name /quinquatria/prod --region ap-northeast-2
+aws logs put-retention-policy --log-group-name /quinquatria/prod \
+  --retention-in-days 14 --region ap-northeast-2
+```
+
+**로그 그룹과 `WriteContainerLogs` 권한이 없으면 컨테이너가 시작되지 않아 배포가
+실패합니다.** 기존 서버에 적용할 때도 이 둘을 먼저 준비한 뒤 배포합니다.
 
 ## 3. 빈 서버 준비 (Ubuntu, 한 번만)
 
@@ -259,6 +278,9 @@ Settings → Environments → `production`을 만듭니다.
   실행합니다. 같은 커밋이면 이미지를 다시 빌드하지 않습니다.
 - 실행 결과는 Actions 로그의 stdout, stderr 그룹과 Systems Manager →
   Run Command 기록에서 볼 수 있습니다. 출력은 최대 24,000자까지만 남습니다.
+- 앱 로그는 CloudWatch → 로그 그룹 `/quinquatria/prod`에 컨테이너 이름별
+  스트림으로 쌓입니다. 서버에서는 `sudo docker compose logs`로도 볼 수 있습니다
+  (Docker 20.10 이상).
 
 ## 롤백
 
