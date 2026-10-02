@@ -43,6 +43,8 @@ uv run --all-packages python -m backoffice.domains.catalog.place_seed [JSON 경�
 항목은 `code`(CATEGORY enum), `category_sequence`, `x`, `y`만 받는다. 파일
 전체가 한 transaction이며, 같은 구역 번호가 같은 좌표에 이미 있으면 건너뛰므로
 다시 실행해도 안전하다. 다른 좌표에 있으면 아무것도 넣지 않고 실패한다.
+넣은 장소는 Customer 지도에 빈 마커로 바로 보이므로, 새로 넣은 것이 있으면
+commit 뒤 `places` ISR 재검증을 보낸다(`USER_SITE_URL`, `REVALIDATE_SECRET` 필요).
 
 ## 이미지 cleanup
 

@@ -4,8 +4,8 @@
 
 경로를 생략하면 이미지에 함께 들어가는 `data/map_places.json`을 쓴다.
 항목마다 카테고리·구역 번호·좌표만 넣고, 운영 시간과 번역은 Backoffice
-`PATCH`로 채운다. 번역이 없는 장소는 Customer API에 보이지 않으므로 ISR
-재검증은 보내지 않는다.
+`PATCH`로 채운다. 넣은 장소는 Customer API에 빈 마커로 바로 보이므로, 새로
+넣은 것이 있으면 commit 뒤 `places` ISR 재검증을 보낸다.
 
 파일 전체가 한 transaction이다. 같은 구역 번호가 같은 좌표에 이미 있으면
 건너뛰므로 다시 실행해도 안전하다. 다른 좌표에 있으면 덮어쓰지 않고
@@ -18,8 +18,9 @@ import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Protocol
 
+import httpx
 from pydantic import AfterValidator, TypeAdapter
 from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +28,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backoffice.config import get_settings
 from backoffice.crud.schemas import RequestModel
 from backoffice.domains.catalog.schemas import Coordinate, Position
+from backoffice.revalidation.events import RevalidationTag
+from backoffice.revalidation.sender import RevalidationSender
 from quinquatria_persistence import Database
 from quinquatria_persistence.enums import CategoryCode
 from quinquatria_persistence.models import Category, Place
@@ -99,13 +102,33 @@ async def seed_places(session: AsyncSession, places: Sequence[SeedPlace]) -> See
     return SeedReport(created=len(wanted), skipped=skipped)
 
 
+class _Sender(Protocol):
+    async def send_automatic(self, tag: RevalidationTag) -> None: ...
+
+
+async def run(database: Database, sender: _Sender, path: Path | str) -> SeedReport:
+    """파일을 넣고, 새 장소가 있으면 commit 뒤에 재검증을 보낸다."""
+    places = load(path)
+    async with database.transaction() as session:
+        report = await seed_places(session, places)
+    if report.created:
+        await sender.send_automatic(RevalidationTag.PLACES)
+    return report
+
+
 async def main(path: Path) -> None:
     logging.basicConfig(level=logging.INFO)
-    places = load(path)
-    database = Database(get_settings().database_url)
+    settings = get_settings()
+    database = Database(settings.database_url)
     try:
-        async with database.transaction() as session:
-            report = await seed_places(session, places)
+        # API 프로세스와 같은 전송 조건: 재시도·리다이렉트 없음 (명세 §7.1).
+        async with httpx.AsyncClient(
+            transport=httpx.AsyncHTTPTransport(retries=0), follow_redirects=False
+        ) as client:
+            sender = RevalidationSender(
+                client, settings.user_site_url, settings.revalidate_secret
+            )
+            report = await run(database, sender, path)
     finally:
         await database.dispose()
     logging.getLogger(__name__).info(

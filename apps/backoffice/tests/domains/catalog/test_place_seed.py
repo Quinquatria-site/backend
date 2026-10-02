@@ -10,8 +10,10 @@ from backoffice.domains.catalog.place_seed import (
     BUNDLED,
     SeedConflict,
     load,
+    run,
     seed_places,
 )
+from backoffice.revalidation.events import RevalidationTag
 from quinquatria_persistence.models import Place
 
 _ENTRIES = [
@@ -120,3 +122,26 @@ async def test_invalid_file_is_rejected_before_touching_the_database(
 ) -> None:
     with pytest.raises(ValidationError):
         load(_write(tmp_path, entries))
+
+
+class _RecordingSender:
+    def __init__(self) -> None:
+        self.tags: list[RevalidationTag] = []
+
+    async def send_automatic(self, tag: RevalidationTag) -> None:
+        self.tags.append(tag)
+
+
+async def test_run_revalidates_places_only_when_something_was_created(
+    database, tmp_path
+) -> None:
+    """빈 마커도 지도에 보이므로 넣은 뒤 프런트엔드 캐시를 갱신한다 (명세 §7.1)."""
+    path = _write(tmp_path, _ENTRIES)
+    first, second = _RecordingSender(), _RecordingSender()
+
+    created = await run(database, first, path)
+    repeated = await run(database, second, path)
+
+    assert (created.created, repeated.created) == (2, 0)
+    assert first.tags == [RevalidationTag.PLACES]
+    assert second.tags == []

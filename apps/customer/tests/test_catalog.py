@@ -202,16 +202,23 @@ def test_places_query_applies_filters_before_count_and_page(
     count_sql = compiled_sql(mock_session.scalar.await_args.args[0])
     page_sql = compiled_sql(mock_session.execute.await_args.args[0])
     for sql in (count_sql, page_sql):
-        assert "JOIN place_translation ON place_translation.place_id = place.id" in sql
-        assert "place_translation.language_code = 'EN'" in sql
+        # 번역이 없는 장소도 빈 마커로 보여야 하므로 번역은 외부 조인한다 (명세 §3.3).
+        assert (
+            "LEFT OUTER JOIN place_translation ON "
+            "place_translation.place_id = place.id "
+            "AND place_translation.language_code = 'EN'"
+        ) in sql
+        where = sql.split(" WHERE ", maxsplit=1)[1]
+        assert "place_translation" not in where
+        assert "IS NOT NULL" not in sql
         assert "place.category_id = 10" in sql
-        # 카테고리 없는 장소는 노출하지 않는다 (명세 §3.3).
-        assert "place.category_id IS NOT NULL" in sql
     # 이미지 집계 안의 ORDER BY place_image.seq는 페이지 정렬이 아니다.
     assert "ORDER BY place." not in count_sql
     assert "LIMIT" not in count_sql
     assert "OFFSET" not in count_sql
-    assert "ORDER BY place.category_id, place.category_sequence, place.id" in page_sql
+    assert (
+        "ORDER BY place.category_id ASC NULLS LAST, place.category_sequence, place.id"
+    ) in page_sql
     assert (
         "array_agg(image.s3_key ORDER BY place_image.seq) AS place_image_uri"
     ) in page_sql
@@ -386,7 +393,7 @@ def test_detail_builds_left_join_and_ordered_menu_query(
     ) in place_join
     assert "place_translation.language_code = 'EN'" in place_join
     assert "place_translation.language_code" not in place_where
-    assert place_where == "place.id = 40 AND place.category_id IS NOT NULL"
+    assert place_where == "place.id = 40"
     assert "JOIN menu_translation ON menu_translation.menu_id = menu.id" in menu_sql
     assert "menu_translation.language_code = 'EN'" in menu_sql
     assert "menu.place_id = 40" in menu_sql
@@ -395,44 +402,54 @@ def test_detail_builds_left_join_and_ordered_menu_query(
     assert "LEFT OUTER JOIN image ON image.id = menu.image_id" in menu_sql
 
 
+_EMPTY_MARKER = {
+    "id": 40,
+    "category_id": None,
+    "category_sequence": None,
+    "x": 127.42,
+    "y": 36.18,
+    "start_hour": None,
+    "end_hour": None,
+    "place_image_uri": None,
+    "language_code": None,
+    "name": None,
+    "host_college": None,
+    "description": None,
+}
+"""좌표만 입력된 장소. 카테고리·운영 시간·번역은 백오피스가 나중에 채운다."""
+
+
 @pytest.mark.parametrize("path", ["places", "places/40"])
-def test_place_without_hours_serializes_null_hours(
+def test_coordinate_only_place_is_an_empty_marker(
     customer_client, mock_session, execute_result, path
 ):
-    """쓰레기통처럼 운영 시간이 없는 장소도 노출한다 (명세 §3.3)."""
-    row = _place_row(40) | {"start_hour": None, "end_hour": None}
+    """좌표만 있어도 지도 마커로 보인다. 빈 값은 null이다 (명세 §3.3)."""
     mock_session.scalar.return_value = 1
-    mock_session.execute.side_effect = [execute_result(row), execute_result()]
+    mock_session.execute.side_effect = [
+        execute_result(_EMPTY_MARKER),
+        execute_result(),
+    ]
 
-    response = customer_client.get(f"/api/v1/{path}")
+    response = customer_client.get(f"/api/v1/{path}", params={"language_code": "EN"})
 
     assert response.status_code == 200
     body = response.json()
-    place = body["items"][0] if path == "places" else body
-    assert (place["start_hour"], place["end_hour"]) == (None, None)
+    if path == "places":
+        assert body["items"] == [_EMPTY_MARKER]
+    else:
+        assert body == _EMPTY_MARKER | {"menus": []}
 
 
 @pytest.mark.parametrize(
-    "place_id,language,code",
-    [
-        (999, "KO", "RESOURCE_NOT_FOUND"),
-        (999, "EN", "RESOURCE_NOT_FOUND"),
-        (2_147_483_648, "KO", "RESOURCE_NOT_FOUND"),
-        (10**50, "KO", "RESOURCE_NOT_FOUND"),
-        (30, "EN", "TRANSLATION_NOT_FOUND"),
-        (70, "KO", "TRANSLATION_NOT_FOUND"),
-    ],
+    "place_id,language",
+    [(999, "KO"), (999, "EN"), (2_147_483_648, "KO"), (10**50, "KO")],
 )
-def test_detail_distinguishes_absence_from_missing_translation(
-    customer_client, mock_session, execute_result, place_id, language, code
+def test_detail_of_missing_place_is_404(
+    customer_client, mock_session, execute_result, place_id, language
 ):
+    """요청 언어 번역이 없는 장소는 404가 아니라 빈 마커다. 없는 장소만 404다."""
     if place_id <= 2_147_483_647:
-        result = (
-            execute_result()
-            if code == "RESOURCE_NOT_FOUND"
-            else execute_result({"language_code": None})
-        )
-        mock_session.execute.return_value = result
+        mock_session.execute.return_value = execute_result()
 
     response = customer_client.get(
         f"/api/v1/places/{place_id}", params={"language_code": language}
@@ -440,10 +457,8 @@ def test_detail_distinguishes_absence_from_missing_translation(
 
     assert response.status_code == 404
     assert response.json() == {
-        "code": code,
-        "message": "요청한 리소스를 찾을 수 없습니다."
-        if code == "RESOURCE_NOT_FOUND"
-        else "요청한 언어의 번역이 없습니다.",
+        "code": "RESOURCE_NOT_FOUND",
+        "message": "요청한 리소스를 찾을 수 없습니다.",
         "details": [],
     }
     if place_id > 2_147_483_647:
