@@ -102,12 +102,12 @@ Customer API와 Backoffice API는 별도 FastAPI 애플리케이션으로 배포
 
 ### 2.3 Enum
 
-| 이름               | 허용값                                                                    |
-| ------------------ | ------------------------------------------------------------------------- |
-| `language_code`    | `KO`, `EN`, `CHN`                                                         |
-| `CATEGORY.code`    | `PUB`, `BOOTH`, `FOODTRUCK`, `MEDI`, `TRASHCAN`, `PHOTOBOOTH`, `ENTRANCE` |
-| `PERFORMANCE.type` | `ARTIST`, `STUDENT`, `SPECIAL`                                            |
-| `NOTICE.type`      | `PERMANENT`, `GENERAL`                                                    |
+| 이름               | 허용값                                                                                             |
+| ------------------ | -------------------------------------------------------------------------------------------------- |
+| `language_code`    | `KO`, `EN`, `CHN`                                                                                  |
+| `CATEGORY.code`    | `PUB`, `BOOTH`, `FOODTRUCK`, `MEDI`, `TRASHCAN`, `PHOTOBOOTH`, `ENTRANCE`, `BRACELET`, `PROMOTION` |
+| `PERFORMANCE.type` | `ARTIST`, `STUDENT`, `SPECIAL`                                                                     |
+| `NOTICE.type`      | `PERMANENT`, `GENERAL`                                                                             |
 
 허용값은 대소문자를 구분한다. 다른 값은 `422 VALIDATION_ERROR`로
 처리한다.
@@ -1035,6 +1035,8 @@ DB migration이 아래 행과 번역을 미리 입력하며, Backoffice API로 �
 | `5`  | `TRASHCAN`   | 쓰레기통    | Trash Can      | 垃圾桶     |
 | `6`  | `PHOTOBOOTH` | 포토부스    | Photo Booth    | 拍照亭     |
 | `7`  | `ENTRANCE`   | 무대 출입구 | Stage Entrance | 舞台出入口 |
+| `8`  | `BRACELET`   | 팔찌        | Bracelet       | 手环       |
+| `9`  | `PROMOTION`  | 프로모션    | Promotion      | 促销       |
 
 시드 `id`는 고정값이므로 프런트엔드가 상수로 써도 된다. 시드
 `category_icon_uri`는 `null`이며 아이콘은 업로드 후 `PATCH`로 연결한다.
@@ -1827,7 +1829,7 @@ migration이 입력하며, 배포 시 migration 단계에서 함께 반영된다
     놓인다. 요청 언어 번역이 없는 장소도 `404`가 아니라 번역 필드가 `null`인
     `200`이다.
 45. 카테고리가 없는 장소는 여러 개 있어도 구역 번호 중복으로 보지 않는다.
-46. migration 직후 Category는 5.3 표의 7개 행과 각 KO·EN·CHN 번역을
+46. migration 직후 Category는 5.3 표의 9개 행과 각 KO·EN·CHN 번역을
     가지며, `PATCH`로 `code`를 보내면 `422 VALIDATION_ERROR`다.
 47. 공지 `POST`·`PATCH`에 보낸 `notice_image_uri` 순서가 Backoffice와
     Customer 응답(목록, 최근 공지, 상세)에 그대로 유지되고, 이미지가 없는

@@ -18,6 +18,8 @@ EXPECTED_ENUMS = {
         "TRASHCAN",
         "PHOTOBOOTH",
         "ENTRANCE",
+        "BRACELET",
+        "PROMOTION",
     ],
     "performance_type": ["ARTIST", "STUDENT", "SPECIAL"],
     "notice_type": ["PERMANENT", "GENERAL"],
@@ -162,6 +164,8 @@ SEEDED_CATEGORIES = [
     (5, "TRASHCAN", {"KO": "쓰레기통", "EN": "Trash Can", "CHN": "垃圾桶"}),
     (6, "PHOTOBOOTH", {"KO": "포토부스", "EN": "Photo Booth", "CHN": "拍照亭"}),
     (7, "ENTRANCE", {"KO": "무대 출입구", "EN": "Stage Entrance", "CHN": "舞台出入口"}),
+    (8, "BRACELET", {"KO": "팔찌", "EN": "Bracelet", "CHN": "手环"}),
+    (9, "PROMOTION", {"KO": "프로모션", "EN": "Promotion", "CHN": "促销"}),
 ]
 """명세 §5.3의 고정 카테고리 표."""
 
@@ -202,7 +206,7 @@ def test_upgrade_seeds_the_fixed_categories(migration_engine, alembic_config):
             connection.scalar(
                 text("SELECT nextval(pg_get_serial_sequence('category', 'id'))")
             )
-            == 8
+            == 10
         )
 
 
@@ -327,25 +331,26 @@ def test_downgrade_refuses_while_polygon_places_exist(migration_engine, alembic_
         )
 
 
-def test_downgrade_removes_an_unused_entrance_category(
-    migration_engine, alembic_config
-):
+def test_downgrade_removes_unused_added_categories(migration_engine, alembic_config):
     command.upgrade(alembic_config, "head")
 
     command.downgrade(alembic_config, "0008_place_polygon_area")
 
     with migration_engine.connect() as connection:
         assert _categories(connection) == SEEDED_CATEGORIES[:6]
-        assert "ENTRANCE" not in {
-            label
+        (labels,) = [
+            enum["labels"]
             for enum in inspect(connection).get_enums(schema="public")
             if enum["name"] == "category_code"
-            for label in enum["labels"]
-        }
+        ]
+        assert labels == [code for _, code, _ in SEEDED_CATEGORIES[:6]]
 
 
-def test_downgrade_refuses_while_a_place_uses_entrance(
-    migration_engine, alembic_config
+@pytest.mark.parametrize(
+    ("category_id", "code"), [(7, "ENTRANCE"), (8, "BRACELET"), (9, "PROMOTION")]
+)
+def test_downgrade_refuses_while_a_place_uses_an_added_category(
+    migration_engine, alembic_config, category_id, code
 ):
     """장소를 어느 카테고리로 옮길지 추측하지 않는다."""
     command.upgrade(alembic_config, "head")
@@ -353,15 +358,16 @@ def test_downgrade_refuses_while_a_place_uses_entrance(
         connection.execute(
             text(
                 "INSERT INTO place (category_id, category_sequence, x, y) "
-                "VALUES (7, 1, 0, 0)"
-            )
+                "VALUES (:id, 1, 0, 0)"
+            ),
+            {"id": category_id},
         )
 
-    with pytest.raises(Exception, match="ENTRANCE"):
+    with pytest.raises(Exception, match=code):
         command.downgrade(alembic_config, "0008_place_polygon_area")
 
     with migration_engine.connect() as connection:
         assert (
             connection.scalar(text("SELECT version_num FROM alembic_version"))
-            == "0009_category_entrance"
+            == "0009_category_additions"
         )
