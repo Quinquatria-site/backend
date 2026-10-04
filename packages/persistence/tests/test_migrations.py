@@ -10,7 +10,17 @@ from ._data import DEFAULT_EMPTY_COLUMNS, NULLABLE_COLUMNS, TABLES, VALID_ROWS
 
 EXPECTED_ENUMS = {
     "language_code": ["CHN", "EN", "KO"],
-    "category_code": ["PUB", "BOOTH", "FOODTRUCK", "MEDI", "TRASHCAN", "PHOTOBOOTH"],
+    "category_code": [
+        "PUB",
+        "BOOTH",
+        "FOODTRUCK",
+        "MEDI",
+        "TRASHCAN",
+        "PHOTOBOOTH",
+        "ENTRANCE",
+        "BRACELET",
+        "PROMOTION",
+    ],
     "performance_type": ["ARTIST", "STUDENT", "SPECIAL"],
     "notice_type": ["PERMANENT", "GENERAL"],
     "image_resource_type": [
@@ -57,6 +67,10 @@ def assert_schema(connection):
             assert columns["updated_at"]["default"] is not None
         elif table == "performance":
             assert columns["is_live"]["default"] == "false"
+        elif table == "place":
+            # 구역 장소만 쓰는 열이라 VALID_ROWS의 점 장소에는 없다.
+            expected_fields.add("area")
+            assert columns["is_polygon"]["default"] == "false"
         assert set(columns) == expected_fields
         assert {
             (table, column["name"]) for column in columns.values() if column["nullable"]
@@ -149,6 +163,9 @@ SEEDED_CATEGORIES = [
     (4, "MEDI", {"KO": "의무실", "EN": "Medical Room", "CHN": "医务室"}),
     (5, "TRASHCAN", {"KO": "쓰레기통", "EN": "Trash Can", "CHN": "垃圾桶"}),
     (6, "PHOTOBOOTH", {"KO": "포토부스", "EN": "Photo Booth", "CHN": "拍照亭"}),
+    (7, "ENTRANCE", {"KO": "무대 출입구", "EN": "Stage Entrance", "CHN": "舞台出入口"}),
+    (8, "BRACELET", {"KO": "팔찌", "EN": "Bracelet", "CHN": "手环"}),
+    (9, "PROMOTION", {"KO": "프로모션", "EN": "Promotion", "CHN": "促销"}),
 ]
 """명세 §5.3의 고정 카테고리 표."""
 
@@ -189,7 +206,7 @@ def test_upgrade_seeds_the_fixed_categories(migration_engine, alembic_config):
             connection.scalar(
                 text("SELECT nextval(pg_get_serial_sequence('category', 'id'))")
             )
-            == 7
+            == 10
         )
 
 
@@ -261,7 +278,7 @@ def test_upgrade_refuses_categories_that_do_not_match_the_seed(
 
 def test_downgrade_refuses_while_notice_images_exist(migration_engine, alembic_config):
     """enum 값을 지우면 그 값을 쓰는 image 행을 옮길 곳이 없다."""
-    command.upgrade(alembic_config, "head")
+    command.upgrade(alembic_config, "0007_notice_image")
     with migration_engine.begin() as connection:
         connection.execute(
             text(
@@ -278,4 +295,107 @@ def test_downgrade_refuses_while_notice_images_exist(migration_engine, alembic_c
         assert (
             connection.scalar(text("SELECT version_num FROM alembic_version"))
             == "0007_notice_image"
+        )
+
+
+def test_upgrade_turns_existing_places_into_points(migration_engine, alembic_config):
+    command.upgrade(alembic_config, "0007_notice_image")
+    with migration_engine.begin() as connection:
+        connection.execute(text("INSERT INTO place (x, y) VALUES (1.5, 2.5)"))
+
+    command.upgrade(alembic_config, "head")
+
+    with migration_engine.connect() as connection:
+        row = connection.execute(text("SELECT is_polygon, x, y, area FROM place"))
+        assert tuple(row.one()) == (False, 1.5, 2.5, None)
+
+
+def test_downgrade_refuses_while_polygon_places_exist(migration_engine, alembic_config):
+    """x·y가 다시 필수가 되면 구역 장소를 옮길 좌표가 없다."""
+    command.upgrade(alembic_config, "0008_place_polygon_area")
+    with migration_engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO place (is_polygon, area) "
+                "VALUES (true, '((0,0),(1,0),(1,1))')"
+            )
+        )
+
+    with pytest.raises(Exception, match="polygon"):
+        command.downgrade(alembic_config, "0007_notice_image")
+
+    with migration_engine.connect() as connection:
+        assert (
+            connection.scalar(text("SELECT version_num FROM alembic_version"))
+            == "0008_place_polygon_area"
+        )
+
+
+def test_downgrade_removes_unused_added_categories(migration_engine, alembic_config):
+    command.upgrade(alembic_config, "head")
+
+    command.downgrade(alembic_config, "0008_place_polygon_area")
+
+    with migration_engine.connect() as connection:
+        assert _categories(connection) == SEEDED_CATEGORIES[:6]
+        (labels,) = [
+            enum["labels"]
+            for enum in inspect(connection).get_enums(schema="public")
+            if enum["name"] == "category_code"
+        ]
+        assert labels == [code for _, code, _ in SEEDED_CATEGORIES[:6]]
+
+
+def test_downgrade_detaches_icons_of_removed_categories(
+    migration_engine, alembic_config
+):
+    """지운 카테고리의 아이콘이 ATTACHED로 남으면 cleanup이 영영 회수하지 않는다."""
+    command.upgrade(alembic_config, "head")
+    with migration_engine.begin() as connection:
+        icon_id = connection.scalar(
+            text(
+                "INSERT INTO image (s3_key, resource_type, content_type, "
+                "declared_size, status) VALUES ('images/category/a.webp', "
+                "'CATEGORY_ICON', 'image/webp', 1, 'ATTACHED') RETURNING id"
+            )
+        )
+        connection.execute(
+            text("UPDATE category SET image_id = :id WHERE id = 8"), {"id": icon_id}
+        )
+
+    command.downgrade(alembic_config, "0008_place_polygon_area")
+
+    with migration_engine.connect() as connection:
+        row = connection.execute(
+            text("SELECT status::text, detached_at FROM image WHERE id = :id"),
+            {"id": icon_id},
+        ).one()
+    assert row.status == "DETACHED"
+    assert row.detached_at is not None
+
+
+@pytest.mark.parametrize(
+    ("category_id", "code"), [(7, "ENTRANCE"), (8, "BRACELET"), (9, "PROMOTION")]
+)
+def test_downgrade_refuses_while_a_place_uses_an_added_category(
+    migration_engine, alembic_config, category_id, code
+):
+    """장소를 어느 카테고리로 옮길지 추측하지 않는다."""
+    command.upgrade(alembic_config, "head")
+    with migration_engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO place (category_id, category_sequence, x, y) "
+                "VALUES (:id, 1, 0, 0)"
+            ),
+            {"id": category_id},
+        )
+
+    with pytest.raises(Exception, match=code):
+        command.downgrade(alembic_config, "0008_place_polygon_area")
+
+    with migration_engine.connect() as connection:
+        assert (
+            connection.scalar(text("SELECT version_num FROM alembic_version"))
+            == "0009_category_additions"
         )

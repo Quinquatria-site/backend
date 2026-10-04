@@ -21,10 +21,13 @@ from backoffice.domains.catalog.common import (
     no_content,
 )
 from backoffice.domains.catalog.schemas import (
+    PLACE_PAIRS,
+    PLACE_SHAPE_FIELDS,
     PlaceCreate,
     PlaceOut,
     PlacePatch,
     PlaceTranslationOut,
+    VertexIn,
     by_language,
     ensure_place_rules,
 )
@@ -35,6 +38,7 @@ from common.pagination import Page
 from common.query import NoQuery, PageQuery
 from common.types import ResourceId
 from quinquatria_persistence.enums import ImageResourceType, LanguageCode
+from quinquatria_persistence.geometry import Vertex
 from quinquatria_persistence.models import (
     Category,
     Menu,
@@ -52,14 +56,20 @@ def _ordered_image_ids(place: Place) -> list[int]:
     return [row.image_id for row in sorted(place.images, key=lambda row: row.seq)]
 
 
+def _vertices(area: Sequence[VertexIn] | None) -> list[Vertex] | None:
+    return None if area is None else [Vertex(point.x, point.y) for point in area]
+
+
 def _out(place: Place, keys: dict[int, str]) -> PlaceOut:
     image_ids = _ordered_image_ids(place)
     return PlaceOut(
         id=place.id,
         category_id=place.category_id,
         category_sequence=place.category_sequence,
+        is_polygon=place.is_polygon,
         x=place.x,
         y=place.y,
+        area=place.area,
         start_hour=place.start_hour,
         end_hour=place.end_hour,
         place_image_uri=[keys[image_id] for image_id in image_ids] or None,
@@ -145,8 +155,10 @@ async def create_place(
     place = Place(
         category_id=body.category_id,
         category_sequence=body.category_sequence,
+        is_polygon=body.is_polygon,
         x=body.x,
         y=body.y,
+        area=_vertices(body.area),
         start_hour=body.start_hour,
         end_hour=body.end_hour,
         # 읽기만 한 빈 컬렉션은 저장되지 않아 flush 뒤 lazy="raise"에 걸린다.
@@ -182,9 +194,14 @@ async def update_place(
     ensure_place_rules(
         {
             name: changes.get(name, getattr(place, name))
-            for name in ("category_id", "category_sequence", "start_hour", "end_hour")
+            for name in (
+                *PLACE_SHAPE_FIELDS,
+                *(name for pair in PLACE_PAIRS for name in pair),
+            )
         }
     )
+    if "area" in changes:
+        changes["area"] = _vertices(body.area)
     if body.category_id is not None and body.category_id != place.category_id:
         await lock_parent(session, Category, body.category_id)
     if "place_image_uri" in changes:

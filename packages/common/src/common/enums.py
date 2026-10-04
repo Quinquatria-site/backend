@@ -20,6 +20,9 @@ class CategoryCode(StrEnum):
     MEDI = "MEDI"
     TRASHCAN = "TRASHCAN"
     PHOTOBOOTH = "PHOTOBOOTH"
+    ENTRANCE = "ENTRANCE"
+    BRACELET = "BRACELET"
+    PROMOTION = "PROMOTION"
 
 
 class PerformanceType(StrEnum):

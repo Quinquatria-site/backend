@@ -208,9 +208,10 @@ async def create_notice(database: Database) -> int:
 
 DB는 필수값, 양수 ID, 허용 enum, 부모 FK, 언어별 번역 중복, 순서·가격·시간
 범위를 보장합니다. 장소 이미지는 NULL 원소가 없는 비어 있지 않은 1차원
-배열입니다. Place가 연결된 Category의 삭제는 거부하며, Place를 삭제하면
-Menu와 관련 번역까지 연쇄 삭제합니다. 다른 리소스의 번역도 부모와 함께
-삭제합니다. 이 규칙은 ORM을 거치지 않는 SQL에도 적용됩니다.
+배열입니다. 장소는 `is_polygon`에 따라 `x`·`y`(점) 또는 꼭짓점 3개 이상의
+`area` polygon(구역) 중 한쪽만 값을 갖습니다. Place가 연결된 Category의
+삭제는 거부하며, Place를 삭제하면 Menu와 관련 번역까지 연쇄 삭제합니다.
+다른 리소스의 번역도 부모와 함께 삭제합니다. 이 규칙은 ORM을 거치지 않는 SQL에도 적용됩니다.
 
 다음 규칙은 후속 API에서 검증합니다.
 

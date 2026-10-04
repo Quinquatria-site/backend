@@ -70,6 +70,9 @@ Customer API와 Backoffice API는 별도 FastAPI 애플리케이션으로 배포
 - `price`는 원 단위의 0 이상 정수다.
 - `x`와 `y`는 지도 좌표를 나타내는 실수다. 좌표계와 유효 범위는
   프론트엔드 지도 에셋 계약에서 별도로 정한다.
+- 장소 위치는 `is_polygon`에 따라 점 하나(`x`, `y`) 또는 구역
+  다각형(`area`)이다. `area`는 같은 좌표계의 꼭짓점 `{ "x", "y" }` 배열이며
+  꼭짓점 순서대로 이은 닫힌 다각형이다(5.4).
 - 이미지 필드는 Backoffice 이미지 업로드 API가 반환한 S3 object key를
   주고받는다. 저장은 내부 `IMAGE` 엔티티 참조로 하며 `image_id`는 API에
   노출하지 않는다. 리소스 생성·수정 시 API가 객체 존재 여부, 용도별
@@ -99,12 +102,12 @@ Customer API와 Backoffice API는 별도 FastAPI 애플리케이션으로 배포
 
 ### 2.3 Enum
 
-| 이름               | 허용값                                                        |
-| ------------------ | ------------------------------------------------------------- |
-| `language_code`    | `KO`, `EN`, `CHN`                                             |
-| `CATEGORY.code`    | `PUB`, `BOOTH`, `FOODTRUCK`, `MEDI`, `TRASHCAN`, `PHOTOBOOTH` |
-| `PERFORMANCE.type` | `ARTIST`, `STUDENT`, `SPECIAL`                                |
-| `NOTICE.type`      | `PERMANENT`, `GENERAL`                                        |
+| 이름               | 허용값                                                                                             |
+| ------------------ | -------------------------------------------------------------------------------------------------- |
+| `language_code`    | `KO`, `EN`, `CHN`                                                                                  |
+| `CATEGORY.code`    | `PUB`, `BOOTH`, `FOODTRUCK`, `MEDI`, `TRASHCAN`, `PHOTOBOOTH`, `ENTRANCE`, `BRACELET`, `PROMOTION` |
+| `PERFORMANCE.type` | `ARTIST`, `STUDENT`, `SPECIAL`                                                                     |
+| `NOTICE.type`      | `PERMANENT`, `GENERAL`                                                                             |
 
 허용값은 대소문자를 구분한다. 다른 값은 `422 VALIDATION_ERROR`로
 처리한다.
@@ -264,7 +267,7 @@ Customer 카테고리 응답 필드는 다음과 같다.
 정렬은 `category_id ASC, category_sequence ASC, id ASC`이며
 `category_id`가 `null`인 장소는 맨 뒤에 놓인다.
 
-좌표만 입력된 장소도 지도에 빈 마커로 보여야 한다. 그래서 장소는
+위치만 입력된 장소도 지도에 빈 마커로 보여야 한다. 그래서 장소는
 카테고리·운영 시간·번역 유무와 관계없이 모두 반환한다. 아직 채우지 않은
 값은 `null`이며, 운영자가 Backoffice `PATCH`로 채우면 같은 마커에
 반영된다. 장소 생성 흐름은 5.4에 있다.
@@ -283,8 +286,10 @@ Customer 카테고리 응답 필드는 다음과 같다.
 | `id`                | integer                 | 장소 ID                                                             |
 | `category_id`       | integer \| null         | 카테고리 ID, 아직 없으면 `null`                                     |
 | `category_sequence` | integer \| null         | 카테고리 내 표시 순서, 아직 없으면 `null`                           |
-| `x`                 | number                  | 지도 x 좌표                                                         |
-| `y`                 | number                  | 지도 y 좌표                                                         |
+| `is_polygon`        | boolean                 | `true`면 구역(`area`), `false`면 점(`x`, `y`) 장소                  |
+| `x`                 | number \| null          | 지도 x 좌표, 구역 장소는 `null`                                     |
+| `y`                 | number \| null          | 지도 y 좌표, 구역 장소는 `null`                                     |
+| `area`              | Vertex[] \| null        | 구역 꼭짓점 `{ "x", "y" }` 목록(순서 보존), 점 장소는 `null`        |
 | `start_hour`        | datetime string \| null | 운영 시작 시각, 운영 시간이 없는 장소는 `null`                      |
 | `end_hour`          | datetime string \| null | 운영 종료 시각, 운영 시간이 없는 장소는 `null`                      |
 | `place_image_uri`   | string[] \| null        | `PLACE_IMAGE` 업로드로 받은 object key 목록, 이미지가 없으면 `null` |
@@ -320,8 +325,10 @@ Customer 카테고리 응답 필드는 다음과 같다.
     "id": 10,
     "category_id": 1,
     "category_sequence": 3,
+    "is_polygon": false,
     "x": 127.42,
     "y": 36.18,
+    "area": null,
     "start_hour": "2026-10-06T10:00:00+09:00",
     "end_hour": "2026-10-06T22:00:00+09:00",
     "place_image_uri": [
@@ -1019,14 +1026,17 @@ DB migration이 아래 행과 번역을 미리 입력하며, Backoffice API로 �
 `PATCH` 본문에 `id`나 `code`를 넣으면 `422 VALIDATION_ERROR`다. 아이콘과
 번역 이름만 `PATCH`로 바꾼다.
 
-| `id` | `code`       | KO       | EN           | CHN    |
-| ---- | ------------ | -------- | ------------ | ------ |
-| `1`  | `PUB`        | 주점     | Pub          | 酒馆   |
-| `2`  | `BOOTH`      | 부스     | Booth        | 摊位   |
-| `3`  | `FOODTRUCK`  | 푸드트럭 | Food Truck   | 餐车   |
-| `4`  | `MEDI`       | 의무실   | Medical Room | 医务室 |
-| `5`  | `TRASHCAN`   | 쓰레기통 | Trash Can    | 垃圾桶 |
-| `6`  | `PHOTOBOOTH` | 포토부스 | Photo Booth  | 拍照亭 |
+| `id` | `code`       | KO          | EN             | CHN        |
+| ---- | ------------ | ----------- | -------------- | ---------- |
+| `1`  | `PUB`        | 주점        | Pub            | 酒馆       |
+| `2`  | `BOOTH`      | 부스        | Booth          | 摊位       |
+| `3`  | `FOODTRUCK`  | 푸드트럭    | Food Truck     | 餐车       |
+| `4`  | `MEDI`       | 의무실      | Medical Room   | 医务室     |
+| `5`  | `TRASHCAN`   | 쓰레기통    | Trash Can      | 垃圾桶     |
+| `6`  | `PHOTOBOOTH` | 포토부스    | Photo Booth    | 拍照亭     |
+| `7`  | `ENTRANCE`   | 무대 출입구 | Stage Entrance | 舞台出入口 |
+| `8`  | `BRACELET`   | 팔찌        | Bracelet       | 手环       |
+| `9`  | `PROMOTION`  | 프로모션    | Promotion      | 促销       |
 
 시드 `id`는 고정값이므로 프런트엔드가 상수로 써도 된다. 시드
 `category_icon_uri`는 `null`이며 아이콘은 업로드 후 `PATCH`로 연결한다.
@@ -1047,8 +1057,10 @@ DB migration이 아래 행과 번역을 미리 입력하며, Backoffice API로 �
 | 필드                | 타입                    | POST      | PATCH               | 설명                                       |
 | ------------------- | ----------------------- | --------- | ------------------- | ------------------------------------------ |
 | `id`                | integer                 | 서버 생성 | 수정 불가           | 장소 ID                                    |
-| `x`                 | number                  | 필수      | 선택, `null` 불가   | 지도 x 좌표                                |
-| `y`                 | number                  | 필수      | 선택, `null` 불가   | 지도 y 좌표                                |
+| `is_polygon`        | boolean                 | 선택      | 선택, `null` 불가   | 위치 표현, 기본값 `false`                  |
+| `x`                 | number \| null          | 조건부    | 선택                | 지도 x 좌표, 점이면 필수·구역이면 `null`   |
+| `y`                 | number \| null          | 조건부    | 선택                | 지도 y 좌표, 점이면 필수·구역이면 `null`   |
+| `area`              | Vertex[] \| null        | 조건부    | 선택                | 구역 꼭짓점, 구역이면 필수·점이면 `null`   |
 | `category_id`       | integer \| null         | 선택      | 선택                | 존재하는 카테고리 ID, 기본값 `null`        |
 | `category_sequence` | integer \| null         | 선택      | 선택                | 1 이상, 카테고리 내 유일, 기본값 `null`    |
 | `start_hour`        | datetime string \| null | 선택      | 선택                | 운영 시작 시각, 기본값 `null`              |
@@ -1056,8 +1068,9 @@ DB migration이 아래 행과 번역을 미리 입력하며, Backoffice API로 �
 | `place_image_uri`   | string[] \| null        | 선택      | 선택                | 순서가 보존되는 이미지 목록, 기본값 `null` |
 | `translations`      | PlaceTranslation[]      | 선택      | 선택, 언어별 upsert | 전체 번역, 생략 시 빈 배열                 |
 
-장소는 두 단계로 입력한다. 먼저 지도 위 위치만 정해 `x`, `y`만으로
-`POST`한다. 이 단계의 장소는 좌표만 가진 빈 자리다. 그 뒤 `PATCH`로
+장소는 두 단계로 입력한다. 먼저 지도 위 위치만 정해 `POST`한다. 점
+장소는 `x`, `y`만, 구역 장소는 `is_polygon: true`와 `area`만 보낸다. 이
+단계의 장소는 위치만 가진 빈 자리다. 그 뒤 `PATCH`로
 카테고리(주점·부스 등), 구역 번호, 운영 시간, 번역을 채운다. 한 번에 모두
 보내는 `POST`도 허용한다.
 
@@ -1071,7 +1084,7 @@ DB migration이 아래 행과 번역을 미리 입력하며, Backoffice API로 �
 - `POST`의 `translations`를 보낼 때는 5.2의 규칙대로 `KO` 번역을 정확히
   1개 포함해야 한다. 생략하면 번역 없는 장소가 만들어지고, 이후 `PATCH`로
   언어별 번역을 추가한다.
-- 좌표만 있는 장소도 Customer API에 빈 마커로 바로 노출된다(3.3).
+- 위치만 있는 장소도 Customer API에 빈 마커로 바로 노출된다(3.3).
   Backoffice와 Customer 목록 모두 `category_id`가 `null`인 장소를 맨 뒤에
   둔다.
 
@@ -1094,6 +1107,35 @@ DB migration이 아래 행과 번역을 미리 입력하며, Backoffice API로 �
   장소를 삭제해도 남은 장소의 번호를 다시 매기지 않는다.
 - 서버가 번호를 정하거나 재정렬하지 않는다. 두 장소의 번호를 맞바꾸려면
   한 장소를 쓰이지 않는 번호로 먼저 옮긴 뒤 차례로 `PATCH`한다.
+
+위치 표현은 `is_polygon`이 정한다. 판정 대상은 요청 반영 후의 값이며,
+`PATCH`로 일부만 보내면 저장된 나머지 값과 합쳐 판정한다.
+
+- `is_polygon`이 `false`(점)면 `x`, `y`가 모두 있어야 하고 `area`는
+  `null`이어야 한다.
+- `is_polygon`이 `true`(구역)면 `area`가 있어야 하고 `x`, `y`는 `null`이어야
+  한다.
+- 위반은 `422 VALIDATION_ERROR`다. `details`에는 값이 빠졌거나 남으면 안
+  되는 필드가 각각 하나씩 들어간다.
+- 점과 구역을 바꾸는 `PATCH`는 반대쪽 값을 직접 `null`로 보낸다. 서버가
+  자동으로 지우지 않는다. 예: 점 → 구역은
+  `{"is_polygon": true, "area": [...], "x": null, "y": null}`.
+
+`area`는 꼭짓점 `Vertex` 배열이다. 위반은 `422 VALIDATION_ERROR`다.
+
+- 꼭짓점은 3개 이상이다. 마지막 꼭짓점이 첫 꼭짓점으로 이어진 닫힌
+  다각형이므로 첫 꼭짓점을 끝에 반복하지 않는다.
+- 꼭짓점은 `x`, `y` 두 필드만 갖는 객체이며 둘 다 유한한 실수다. `null`,
+  문자열, `[x, y]` 형태의 배열은 허용하지 않는다.
+- 배열 순서는 꼭짓점을 잇는 순서이며 API가 보존한다. 자기 교차 등 도형의
+  유효성은 검사하지 않는다.
+
+`Vertex`:
+
+| 필드 | 타입   | 필수 | 설명        |
+| ---- | ------ | ---- | ----------- |
+| `x`  | number | 예   | 지도 x 좌표 |
+| `y`  | number | 예   | 지도 y 좌표 |
 
 `place_image_uri`는 이미지가 없음을 `null`로 표현한다. 배열을 보낼
 때는 다음을 지킨다. 위반은 `422 VALIDATION_ERROR`다.
@@ -1129,14 +1171,32 @@ DB migration이 아래 행과 번역을 미리 입력하며, Backoffice API로 �
     "id": 10,
     "category_id": null,
     "category_sequence": null,
+    "is_polygon": false,
     "x": 127.42,
     "y": 36.18,
+    "area": null,
     "start_hour": null,
     "end_hour": null,
     "place_image_uri": null,
     "translations": []
 }
 ```
+
+구역으로 생성하는 요청 예시:
+
+```json
+{
+    "is_polygon": true,
+    "area": [
+        { "x": 120.0, "y": 30.0 },
+        { "x": 130.0, "y": 30.0 },
+        { "x": 130.0, "y": 40.0 },
+        { "x": 120.0, "y": 40.0 }
+    ]
+}
+```
+
+응답의 `x`, `y`는 `null`이고 `area`는 보낸 꼭짓점 순서 그대로다.
 
 이어서 카테고리와 번역을 채우는 요청 예시:
 
@@ -1655,12 +1715,17 @@ ERD에는 구역 문자가 없으므로 API가 `A1`과 같은 구역 번호를 �
 바꾸므로 공연의 `(date, seq)`와 달리 deferrable로 두지 않는다. 동시 요청이
 같은 쌍을 쓰려다 제약에 걸려도 5.4대로 `422 VALIDATION_ERROR`를 반환한다.
 
-장소를 좌표만으로 먼저 만들 수 있도록 `PLACE`에서 `x`, `y`만 NOT NULL로
-두고 `category_id`, `category_sequence`, `start_hour`, `end_hour`는
-nullable로 바꾼다. `(category_id, category_sequence)`와
+장소를 위치만으로 먼저 만들 수 있도록 `category_id`, `category_sequence`,
+`start_hour`, `end_hour`는 nullable로 둔다. `(category_id, category_sequence)`와
 `(start_hour, end_hour)`에는 둘 다 `NULL`이거나 둘 다 값이 있어야 하는 check
 제약을 둔다. 위 unique 제약은 `NULL` 쌍을 서로 다른 값으로 보므로 카테고리
 없는 장소 여러 개를 막지 않는다.
+
+`PLACE.is_polygon`은 NOT NULL boolean(기본값 `false`)이다. 구역은
+PostgreSQL 기본 `polygon` 타입의 `area` 열에 저장하며 별도 타입을 만들지
+않는다. check 제약이 점 장소는 `x`, `y`만, 구역 장소는 `area`만 값을 갖게
+하고, `area`의 꼭짓점이 3개 이상(`npoints(area) >= 3`)이게 한다. 기존 장소는
+모두 점 장소로 옮겨진다.
 
 `CATEGORY.code`에는 unique 제약을 둔다. 5.3의 고정 목록은 Alembic data
 migration이 입력하며, 배포 시 migration 단계에서 함께 반영된다.
@@ -1764,7 +1829,7 @@ migration이 입력하며, 배포 시 migration 단계에서 함께 반영된다
     놓인다. 요청 언어 번역이 없는 장소도 `404`가 아니라 번역 필드가 `null`인
     `200`이다.
 45. 카테고리가 없는 장소는 여러 개 있어도 구역 번호 중복으로 보지 않는다.
-46. migration 직후 Category는 5.3 표의 6개 행과 각 KO·EN·CHN 번역을
+46. migration 직후 Category는 5.3 표의 9개 행과 각 KO·EN·CHN 번역을
     가지며, `PATCH`로 `code`를 보내면 `422 VALIDATION_ERROR`다.
 47. 공지 `POST`·`PATCH`에 보낸 `notice_image_uri` 순서가 Backoffice와
     Customer 응답(목록, 최근 공지, 상세)에 그대로 유지되고, 이미지가 없는
@@ -1774,3 +1839,11 @@ migration이 입력하며, 배포 시 migration 단계에서 함께 반영된다
     `DETACHED`가 된다.
 49. `notice_image_uri`에 `images/notice/`가 아닌 prefix의 key를 보내면
     `422 INVALID_IMAGE`다.
+50. `is_polygon: true`와 꼭짓점 3개 이상의 `area`로 Place를 `POST`하면
+    `201`이며, Backoffice와 Customer 응답의 `x`, `y`는 `null`, `area`는 보낸
+    순서 그대로다.
+51. 점 장소에 `area`가 남거나 `x`·`y`가 빠지면, 구역 장소에 `x`·`y`가 남거나
+    `area`가 빠지면 `422 VALIDATION_ERROR`다. `PATCH`는 저장된 값과 합쳐
+    판정한다.
+52. 꼭짓점이 3개 미만이거나 `x`·`y`가 없는 꼭짓점이 있는 `area`는
+    `422 VALIDATION_ERROR`다.

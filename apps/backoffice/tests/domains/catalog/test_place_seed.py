@@ -96,6 +96,25 @@ async def test_taken_pair_at_other_coordinates_aborts_everything(
     assert len(await _places(database)) == 1
 
 
+async def test_taken_pair_on_a_polygon_place_aborts(database, tmp_path) -> None:
+    """시드는 점 장소만 넣는다. 같은 구역 번호의 구역 장소를 덮어쓰지 않는다."""
+    async with database.transaction() as session:
+        session.add(
+            Place(
+                category_id=2,
+                category_sequence=101,
+                is_polygon=True,
+                area=[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)],
+            )
+        )
+
+    with pytest.raises(SeedConflict, match="BOOTH 101이 이미 구역 장소로"):
+        async with database.transaction() as session:
+            await seed_places(session, load(_write(tmp_path, _ENTRIES)))
+
+    assert len(await _places(database)) == 1
+
+
 @pytest.mark.parametrize(
     "entries",
     [
