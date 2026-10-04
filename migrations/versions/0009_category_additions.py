@@ -9,8 +9,9 @@ The enum type is rebuilt rather than extended with ``ALTER TYPE ... ADD
 VALUE`` because the new values are used by the seed rows in the same
 transaction.
 
-Downgrade fails while a place uses one of these categories. Otherwise the
-rows and their translations are deleted and the type is rebuilt without them.
+Downgrade fails while a place uses one of these categories. Otherwise their
+icons are detached for cleanup, the rows and their translations are deleted
+and the type is rebuilt without them.
 """
 
 from collections.abc import Sequence
@@ -92,6 +93,16 @@ def downgrade() -> None:
             "Move or delete them before downgrading."
         )
 
+    # Deleting a category leaves its icon ATTACHED, which cleanup never
+    # reclaims. Detach it here, as the API does when it deletes a resource.
+    op.execute(
+        sa.text(
+            "UPDATE image SET status = 'DETACHED', "
+            "detached_at = current_timestamp, updated_at = current_timestamp "
+            "WHERE status <> 'DETACHED' AND id IN ("
+            "SELECT image_id FROM category WHERE code::text IN :codes)"
+        ).bindparams(codes)
+    )
     # Translations go with the rows through the foreign key cascade.
     op.execute(
         sa.text("DELETE FROM category WHERE code::text IN :codes").bindparams(codes)

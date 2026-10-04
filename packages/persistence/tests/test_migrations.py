@@ -346,6 +346,34 @@ def test_downgrade_removes_unused_added_categories(migration_engine, alembic_con
         assert labels == [code for _, code, _ in SEEDED_CATEGORIES[:6]]
 
 
+def test_downgrade_detaches_icons_of_removed_categories(
+    migration_engine, alembic_config
+):
+    """지운 카테고리의 아이콘이 ATTACHED로 남으면 cleanup이 영영 회수하지 않는다."""
+    command.upgrade(alembic_config, "head")
+    with migration_engine.begin() as connection:
+        icon_id = connection.scalar(
+            text(
+                "INSERT INTO image (s3_key, resource_type, content_type, "
+                "declared_size, status) VALUES ('images/category/a.webp', "
+                "'CATEGORY_ICON', 'image/webp', 1, 'ATTACHED') RETURNING id"
+            )
+        )
+        connection.execute(
+            text("UPDATE category SET image_id = :id WHERE id = 8"), {"id": icon_id}
+        )
+
+    command.downgrade(alembic_config, "0008_place_polygon_area")
+
+    with migration_engine.connect() as connection:
+        row = connection.execute(
+            text("SELECT status::text, detached_at FROM image WHERE id = :id"),
+            {"id": icon_id},
+        ).one()
+    assert row.status == "DETACHED"
+    assert row.detached_at is not None
+
+
 @pytest.mark.parametrize(
     ("category_id", "code"), [(7, "ENTRANCE"), (8, "BRACELET"), (9, "PROMOTION")]
 )
