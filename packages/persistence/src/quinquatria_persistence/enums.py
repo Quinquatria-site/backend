@@ -17,6 +17,7 @@ class CategoryCode(StrEnum):
     MEDI = "MEDI"
     TRASHCAN = "TRASHCAN"
     PHOTOBOOTH = "PHOTOBOOTH"
+    ENTRANCE = "ENTRANCE"
 
 
 class PerformanceType(StrEnum):

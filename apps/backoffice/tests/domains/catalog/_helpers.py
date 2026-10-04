@@ -38,6 +38,7 @@ SEEDED_CATEGORIES = {
     "MEDI": (4, {"KO": "의무실", "EN": "Medical Room", "CHN": "医务室"}),
     "TRASHCAN": (5, {"KO": "쓰레기통", "EN": "Trash Can", "CHN": "垃圾桶"}),
     "PHOTOBOOTH": (6, {"KO": "포토부스", "EN": "Photo Booth", "CHN": "拍照亭"}),
+    "ENTRANCE": (7, {"KO": "무대 출입구", "EN": "Stage Entrance", "CHN": "舞台出入口"}),
 }
 """migration이 넣는 고정 카테고리 (명세 §5.3). 테스트 DB는 매번 비우므로 다시 넣는다."""
 

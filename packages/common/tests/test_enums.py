@@ -16,6 +16,7 @@ def test_category_code_members() -> None:
         "MEDI",
         "TRASHCAN",
         "PHOTOBOOTH",
+        "ENTRANCE",
     ]
 
 

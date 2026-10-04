@@ -10,7 +10,15 @@ from ._data import DEFAULT_EMPTY_COLUMNS, NULLABLE_COLUMNS, TABLES, VALID_ROWS
 
 EXPECTED_ENUMS = {
     "language_code": ["CHN", "EN", "KO"],
-    "category_code": ["PUB", "BOOTH", "FOODTRUCK", "MEDI", "TRASHCAN", "PHOTOBOOTH"],
+    "category_code": [
+        "PUB",
+        "BOOTH",
+        "FOODTRUCK",
+        "MEDI",
+        "TRASHCAN",
+        "PHOTOBOOTH",
+        "ENTRANCE",
+    ],
     "performance_type": ["ARTIST", "STUDENT", "SPECIAL"],
     "notice_type": ["PERMANENT", "GENERAL"],
     "image_resource_type": [
@@ -153,6 +161,7 @@ SEEDED_CATEGORIES = [
     (4, "MEDI", {"KO": "의무실", "EN": "Medical Room", "CHN": "医务室"}),
     (5, "TRASHCAN", {"KO": "쓰레기통", "EN": "Trash Can", "CHN": "垃圾桶"}),
     (6, "PHOTOBOOTH", {"KO": "포토부스", "EN": "Photo Booth", "CHN": "拍照亭"}),
+    (7, "ENTRANCE", {"KO": "무대 출입구", "EN": "Stage Entrance", "CHN": "舞台出入口"}),
 ]
 """명세 §5.3의 고정 카테고리 표."""
 
@@ -193,7 +202,7 @@ def test_upgrade_seeds_the_fixed_categories(migration_engine, alembic_config):
             connection.scalar(
                 text("SELECT nextval(pg_get_serial_sequence('category', 'id'))")
             )
-            == 7
+            == 8
         )
 
 
@@ -299,7 +308,7 @@ def test_upgrade_turns_existing_places_into_points(migration_engine, alembic_con
 
 def test_downgrade_refuses_while_polygon_places_exist(migration_engine, alembic_config):
     """x·y가 다시 필수가 되면 구역 장소를 옮길 좌표가 없다."""
-    command.upgrade(alembic_config, "head")
+    command.upgrade(alembic_config, "0008_place_polygon_area")
     with migration_engine.begin() as connection:
         connection.execute(
             text(
@@ -315,4 +324,44 @@ def test_downgrade_refuses_while_polygon_places_exist(migration_engine, alembic_
         assert (
             connection.scalar(text("SELECT version_num FROM alembic_version"))
             == "0008_place_polygon_area"
+        )
+
+
+def test_downgrade_removes_an_unused_entrance_category(
+    migration_engine, alembic_config
+):
+    command.upgrade(alembic_config, "head")
+
+    command.downgrade(alembic_config, "0008_place_polygon_area")
+
+    with migration_engine.connect() as connection:
+        assert _categories(connection) == SEEDED_CATEGORIES[:6]
+        assert "ENTRANCE" not in {
+            label
+            for enum in inspect(connection).get_enums(schema="public")
+            if enum["name"] == "category_code"
+            for label in enum["labels"]
+        }
+
+
+def test_downgrade_refuses_while_a_place_uses_entrance(
+    migration_engine, alembic_config
+):
+    """장소를 어느 카테고리로 옮길지 추측하지 않는다."""
+    command.upgrade(alembic_config, "head")
+    with migration_engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO place (category_id, category_sequence, x, y) "
+                "VALUES (7, 1, 0, 0)"
+            )
+        )
+
+    with pytest.raises(Exception, match="ENTRANCE"):
+        command.downgrade(alembic_config, "0008_place_polygon_area")
+
+    with migration_engine.connect() as connection:
+        assert (
+            connection.scalar(text("SELECT version_num FROM alembic_version"))
+            == "0009_category_entrance"
         )

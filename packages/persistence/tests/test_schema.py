@@ -215,7 +215,7 @@ async def test_category_code_is_unique(database, rows):
         (
             "category",
             "code",
-            ["PUB", "BOOTH", "FOODTRUCK", "MEDI", "TRASHCAN", "PHOTOBOOTH"],
+            ["PUB", "BOOTH", "FOODTRUCK", "MEDI", "TRASHCAN", "PHOTOBOOTH", "ENTRANCE"],
         ),
         ("performance", "type", ["ARTIST", "STUDENT", "SPECIAL"]),
         ("notice", "type", ["PERMANENT", "GENERAL"]),

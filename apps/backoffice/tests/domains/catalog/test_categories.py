@@ -40,7 +40,7 @@ async def test_list_returns_the_seeded_categories_in_id_order(api) -> None:
     assert [_without_translation_ids(item) for item in body["items"]] == [
         _seeded(code) for code in SEEDED_CATEGORIES
     ]
-    assert (body["page"], body["size"], body["total"]) == (1, 20, 6)
+    assert (body["page"], body["size"], body["total"]) == (1, 20, 7)
 
 
 async def test_list_filters_by_code(api) -> None:
@@ -54,8 +54,12 @@ async def test_list_paginates(api) -> None:
     response = await api.get("/api/v1/categories", params={"page": 2, "size": 4})
 
     body = response.json()
-    assert [item["code"] for item in body["items"]] == ["TRASHCAN", "PHOTOBOOTH"]
-    assert body["total"] == 6
+    assert [item["code"] for item in body["items"]] == [
+        "TRASHCAN",
+        "PHOTOBOOTH",
+        "ENTRANCE",
+    ]
+    assert body["total"] == 7
 
 
 @pytest.mark.parametrize("code", ["pub", "BRACELET"])
@@ -160,7 +164,7 @@ async def test_create_and_delete_are_not_offered(api, method, path) -> None:
 
     assert response.status_code == 405
     assert response.json()["code"] == "INVALID_REQUEST"
-    assert (await api.get("/api/v1/categories")).json()["total"] == 6
+    assert (await api.get("/api/v1/categories")).json()["total"] == 7
 
 
 async def test_requests_without_token_are_rejected(api) -> None:
