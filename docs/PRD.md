@@ -148,7 +148,7 @@ erDiagram
   PLACE ||--o{ PLACE_IMAGE : has
   IMAGE ||--o| PLACE_IMAGE : referenced_by
 
-  NOTICE ||--o{ NOTICE_IMAGE : has
+  NOTICE_TRANSLATION ||--o{ NOTICE_IMAGE : has
   IMAGE ||--o| NOTICE_IMAGE : referenced_by
 
   IMAGE {
@@ -170,8 +170,9 @@ erDiagram
   NOTICE_IMAGE {
     int id PK
     int notice_id FK
+    string language_code FK "번역 (notice_id, language_code) 참조"
     int image_id FK "UNIQUE"
-    int seq "노출 순서"
+    int seq "언어 안의 노출 순서"
   }
 
   CATEGORY {

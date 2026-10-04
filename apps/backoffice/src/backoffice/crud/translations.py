@@ -22,15 +22,18 @@ def upsert_translations[R: TranslationRow](
     existing: MutableSequence[R],
     items: Iterable[TranslationIn],
     factory: Callable[..., R],
+    *,
+    exclude: frozenset[str] = frozenset(),
 ) -> None:
     """전달된 언어만 update 또는 insert한다.
 
     기존 행은 객체를 그대로 두고 필드만 바꿔 번역 `id`와 FK를 유지한다.
     `existing`은 기본 리소스의 `translations` relationship을 로드해 넘긴다.
+    `exclude`는 번역 행의 열이 아니라 호출자가 따로 처리하는 필드다.
     """
     by_language = {row.language_code: row for row in existing}
     for item in items:
-        fields = item.model_dump(exclude={"language_code"})
+        fields = item.model_dump(exclude={"language_code", *exclude})
         row = by_language.get(item.language_code)
         if row is None:
             existing.append(factory(language_code=item.language_code, **fields))

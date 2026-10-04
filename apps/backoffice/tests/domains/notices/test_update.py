@@ -41,8 +41,18 @@ async def test_patch_upserts_only_sent_languages(api: AsyncClient) -> None:
     assert after["CHN"] == before["CHN"]
     chn, en, ko = body["translations"]
     assert chn == created["translations"][0]
-    assert en == {"id": en["id"], "notice_id": created["id"], **new_en}
-    assert ko == {"id": before["KO"], "notice_id": created["id"], **new_ko}
+    assert en == {
+        "id": en["id"],
+        "notice_id": created["id"],
+        **new_en,
+        "notice_image_uri": None,
+    }
+    assert ko == {
+        "id": before["KO"],
+        "notice_id": created["id"],
+        **new_ko,
+        "notice_image_uri": None,
+    }
     assert (await api.get(f"/api/v1/notices/{created['id']}")).json() == body
 
 

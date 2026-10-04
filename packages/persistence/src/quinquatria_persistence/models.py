@@ -15,6 +15,7 @@ from sqlalchemy import (
     DateTime,
     Double,
     ForeignKey,
+    ForeignKeyConstraint,
     Identity,
     Index,
     Integer,
@@ -391,7 +392,7 @@ class Notice(_IdentityMixin, Base):
     images: Mapped[list[NoticeImage]] = relationship(
         back_populates="notice",
         cascade=_OWNED_CASCADE,
-        order_by="NoticeImage.seq",
+        order_by=lambda: (NoticeImage.language_code, NoticeImage.seq),
         lazy="raise",
     )
 
@@ -412,17 +413,36 @@ class NoticeTranslation(_IdentityMixin, Base):
 
 
 class NoticeImage(_IdentityMixin, Base):
-    """공지와 이미지의 순서 있는 연결. 제약은 `PlaceImage`와 같은 이유로 둔다."""
+    """공지 번역(언어)별 이미지의 순서 있는 연결.
+
+    홍보 카드뉴스처럼 글자가 든 이미지는 언어마다 다르므로 언어별로 둔다.
+    `(notice_id, language_code)` FK가 번역이 없는 언어의 이미지를 막고, 번역을
+    지우면 그 언어의 연결도 지우며, 번역의 언어가 바뀌면 따라간다. 순서 unique를 deferrable로 두는 이유는
+    `PlaceImage`와 같다.
+    """
 
     __tablename__ = "notice_image"
     __table_args__ = (
         CheckConstraint("id > 0", name="id_positive"),
         CheckConstraint("seq >= 1", name="seq_positive"),
-        UniqueConstraint("notice_id", "seq", deferrable=True, initially="DEFERRED"),
-        Index(None, "notice_id", "seq"),
+        ForeignKeyConstraint(
+            ["notice_id", "language_code"],
+            ["notice_translation.notice_id", "notice_translation.language_code"],
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        UniqueConstraint(
+            "notice_id",
+            "language_code",
+            "seq",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+        Index(None, "notice_id", "language_code", "seq"),
     )
 
     notice_id: Mapped[int] = mapped_column(ForeignKey("notice.id", ondelete="CASCADE"))
+    language_code: Mapped[LanguageCode] = mapped_column(_language_code_type)
     image_id: Mapped[int] = mapped_column(ForeignKey("image.id"), unique=True)
     seq: Mapped[int] = mapped_column(Integer)
 

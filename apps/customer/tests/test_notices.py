@@ -409,10 +409,14 @@ def test_openapi_describes_notice_query_and_response_contracts(customer_client):
 
 
 IMAGES = ["images/notice/second.webp", "images/notice/first.webp"]
-IMAGE_AGGREGATE = (
-    "array_agg(image.s3_key ORDER BY notice_image.seq) AS notice_image_uri"
+IMAGE_AGGREGATE = "array_agg(image.s3_key ORDER BY notice_image.seq) AS image_keys"
+IMAGE_GROUPING = "GROUP BY notice_image.notice_id, notice_image.language_code"
+IMAGE_FALLBACK = (
+    "coalesce(requested_images.image_keys, ko_images.image_keys) AS notice_image_uri"
 )
-IMAGE_JOIN = "AS notice_images ON notice_images.notice_id = notice.id"
+KO_IMAGE_JOIN = (
+    "AS ko_images ON ko_images.notice_id = notice.id AND ko_images.language_code = 'KO'"
+)
 
 
 def test_notice_images_keep_key_order_across_list_latest_and_detail(
@@ -448,4 +452,35 @@ def test_every_notice_query_aggregates_images_in_display_order(
     assert IMAGE_AGGREGATE in sql
     # 이미지가 없는 공지도 빠지지 않도록 외부 조인한다.
     assert "LEFT OUTER JOIN (SELECT notice_image.notice_id" in sql
-    assert IMAGE_JOIN in sql
+    assert IMAGE_GROUPING in sql
+    assert IMAGE_FALLBACK in sql
+    assert KO_IMAGE_JOIN in sql
+    assert (
+        "AS requested_images ON requested_images.notice_id = notice.id "
+        "AND requested_images.language_code = 'KO'"
+    ) in sql
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["notices", "notices/permanent", "notices/latest", "notices/20"],
+)
+def test_images_use_the_requested_language_then_fall_back_to_ko(
+    customer_client, mock_session, execute_result, compiled_sql, path
+):
+    """이미지는 언어별이다. 요청 언어에 없으면 KO 이미지를 쓴다 (명세 §3.5)."""
+    mock_session.scalar.return_value = 1
+    mock_session.execute.return_value = execute_result(
+        _notice_row(20, "GENERAL", "EN", images=IMAGES)
+    )
+
+    response = customer_client.get(f"/api/v1/{path}", params={"language_code": "EN"})
+
+    assert response.status_code == 200
+    sql = compiled_sql(mock_session.execute.await_args.args[0])
+    assert (
+        "AS requested_images ON requested_images.notice_id = notice.id "
+        "AND requested_images.language_code = 'EN'"
+    ) in sql
+    assert KO_IMAGE_JOIN in sql
+    assert IMAGE_FALLBACK in sql

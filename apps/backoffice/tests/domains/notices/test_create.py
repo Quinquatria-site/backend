@@ -30,6 +30,7 @@ async def test_create_returns_201_with_sorted_translations(api: AsyncClient) -> 
         "id": body["translations"][2]["id"],
         "notice_id": body["id"],
         **KO,
+        "notice_image_uri": None,
     }
 
 

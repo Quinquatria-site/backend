@@ -18,11 +18,12 @@ from backoffice.domains.notices.schemas import (
     NoticeListQuery,
     NoticeOut,
     NoticePatch,
+    NoticeTranslationIn,
     NoticeTranslationOut,
 )
 from backoffice.images.store import ObjectStore
 from backoffice.revalidation.events import RevalidationTag, mark_changed
-from common.errors import ErrorResponse
+from common.errors import ApiError, ErrorCode, ErrorResponse
 from common.pagination import Page
 from common.query import NoQuery
 from common.types import ResourceId
@@ -43,8 +44,19 @@ _LANGUAGE_ORDER = {code: index for index, code in enumerate(LanguageCode)}
 _LOADED = (selectinload(Notice.translations), selectinload(Notice.images))
 
 
-def _ordered_image_ids(notice: Notice) -> list[int]:
-    return [row.image_id for row in sorted(notice.images, key=lambda row: row.seq)]
+_IMAGES = "notice_image_uri"
+
+
+def _image_ids(notice: Notice, language_code: LanguageCode | None = None) -> list[int]:
+    """언어 순서, 언어 안의 노출 순서대로 이미지 id를 낸다. 언어를 주면 그 언어만."""
+    rows = sorted(
+        notice.images, key=lambda row: (_LANGUAGE_ORDER[row.language_code], row.seq)
+    )
+    return [
+        row.image_id
+        for row in rows
+        if language_code is None or row.language_code == language_code
+    ]
 
 
 def _serialize(notice: Notice, keys: dict[int, str]) -> NoticeOut:
@@ -53,12 +65,10 @@ def _serialize(notice: Notice, keys: dict[int, str]) -> NoticeOut:
         notice.translations,
         key=lambda row: (_LANGUAGE_ORDER[row.language_code], row.id),
     )
-    image_ids = _ordered_image_ids(notice)
     return NoticeOut(
         id=notice.id,
         type=notice.type,
         created_at=notice.created_at,
-        notice_image_uri=[keys[image_id] for image_id in image_ids] or None,
         translations=[
             NoticeTranslationOut(
                 id=row.id,
@@ -66,6 +76,10 @@ def _serialize(notice: Notice, keys: dict[int, str]) -> NoticeOut:
                 language_code=row.language_code,
                 title=row.title,
                 content=row.content,
+                notice_image_uri=[
+                    keys[image_id] for image_id in _image_ids(notice, row.language_code)
+                ]
+                or None,
             )
             for row in translations
         ],
@@ -73,18 +87,30 @@ def _serialize(notice: Notice, keys: dict[int, str]) -> NoticeOut:
 
 
 async def _respond(session: AsyncSession, notice: Notice) -> NoticeOut:
-    return _serialize(notice, await image_keys(session, _ordered_image_ids(notice)))
+    return _serialize(notice, await image_keys(session, _image_ids(notice)))
+
+
+def _ensure_distinct_keys(items: Sequence[NoticeTranslationIn]) -> None:
+    """한 object key는 한 언어의 배열에만 둘 수 있다 (명세 §4.6, §5.7).
+
+    같은 그림을 여러 언어에 쓰려면 언어마다 따로 업로드한다. 미리 막지 않으면
+    두 번째 언어의 연결이 `IMAGE_ALREADY_ATTACHED`(409)로 끝나 원인이 흐려진다.
+    """
+    keys = [key for item in items for key in item.notice_image_uri or ()]
+    if len(set(keys)) != len(keys):
+        raise ApiError(ErrorCode.INVALID_IMAGE)
 
 
 async def _set_images(
     session: AsyncSession,
     store: ObjectStore,
     notice: Notice,
+    language_code: LanguageCode,
     object_keys: Sequence[str] | None,
     *,
     max_bytes: int,
 ) -> None:
-    """`NoticeImage` 행을 새 배열 순서로 맞춘다.
+    """한 언어의 `NoticeImage` 행을 새 배열 순서로 맞춘다. 다른 언어는 두지 않는다.
 
     남는 행은 `seq`만 바꿔 재사용한다. 장소 이미지와 같은 이유로, 지우고 다시
     넣으면 한 flush 안에서 `image_id` unique(지연 불가)에 걸릴 수 있다.
@@ -92,21 +118,38 @@ async def _set_images(
     new_ids = await replace_images(
         session,
         store,
-        current_image_ids=_ordered_image_ids(notice),
+        current_image_ids=_image_ids(notice, language_code),
         object_keys=object_keys,
         resource_type=ImageResourceType.NOTICE_IMAGE,
         max_bytes=max_bytes,
     )
-    rows = {row.image_id: row for row in notice.images}
+    rows = {
+        row.image_id: row for row in notice.images if row.language_code == language_code
+    }
     for row in list(notice.images):
-        if row.image_id not in new_ids:
+        if row.language_code == language_code and row.image_id not in new_ids:
             notice.images.remove(row)
     for seq, image_id in enumerate(new_ids, start=1):
         row = rows.get(image_id)
         if row is None:
-            notice.images.append(NoticeImage(image_id=image_id, seq=seq))
+            notice.images.append(
+                NoticeImage(language_code=language_code, image_id=image_id, seq=seq)
+            )
         else:
             row.seq = seq
+
+
+async def _detach_all(
+    session: AsyncSession, store: ObjectStore, image_ids: Sequence[int], max_bytes: int
+) -> None:
+    await replace_images(
+        session,
+        store,
+        current_image_ids=image_ids,
+        object_keys=None,
+        resource_type=ImageResourceType.NOTICE_IMAGE,
+        max_bytes=max_bytes,
+    )
 
 
 @router.get("/notices")
@@ -122,9 +165,7 @@ async def list_notices(
         statement = statement.where(Notice.type == query.type)
 
     async def serialize(notices: Sequence[Notice]) -> list[NoticeOut]:
-        ids = [
-            image_id for notice in notices for image_id in _ordered_image_ids(notice)
-        ]
+        ids = [image_id for notice in notices for image_id in _image_ids(notice)]
         keys = await image_keys(session, ids)
         return [_serialize(notice, keys) for notice in notices]
 
@@ -139,22 +180,28 @@ async def create_notice(
     settings: SettingsDep,
     query: Annotated[NoQuery, Query()],
 ) -> NoticeOut:
+    _ensure_distinct_keys(body.translations)
     notice = Notice(
         type=body.type,
         # 읽기만 한 빈 컬렉션은 저장되지 않아 flush 뒤 lazy="raise"에 걸린다.
         images=[],
         translations=[
-            NoticeTranslation(**item.model_dump()) for item in body.translations
+            NoticeTranslation(**item.model_dump(exclude={_IMAGES}))
+            for item in body.translations
         ],
     )
-    await _set_images(
-        session,
-        store,
-        notice,
-        body.notice_image_uri,
-        max_bytes=settings.max_image_bytes,
-    )
     session.add(notice)
+    # 이미지 행이 FK로 가리킬 번역을 먼저 넣는다.
+    await session.flush()
+    for item in body.translations:
+        await _set_images(
+            session,
+            store,
+            notice,
+            item.language_code,
+            item.notice_image_uri,
+            max_bytes=settings.max_image_bytes,
+        )
     await session.flush()
     await session.refresh(notice, ["created_at"])
     mark_changed(session, RevalidationTag.NOTICES)
@@ -180,20 +227,29 @@ async def update_notice(
 ) -> NoticeOut:
     """행 잠금으로 같은 공지의 동시 PATCH가 같은 언어를 이중 insert하지 않게 한다."""
     notice = await get_or_404(session, Notice, notice_id, *_LOADED, for_update=True)
-    changes = body.changes()
-    if "notice_image_uri" in changes:
-        del changes["notice_image_uri"]
-        await _set_images(
-            session,
-            store,
-            notice,
-            body.notice_image_uri,
-            max_bytes=settings.max_image_bytes,
-        )
-    for name, value in changes.items():
+    for name, value in body.changes().items():
         setattr(notice, name, value)
     if body.translations is not None:
-        upsert_translations(notice.translations, body.translations, NoticeTranslation)
+        _ensure_distinct_keys(body.translations)
+        upsert_translations(
+            notice.translations,
+            body.translations,
+            NoticeTranslation,
+            exclude=frozenset({_IMAGES}),
+        )
+        # 새 언어의 이미지 행이 FK로 가리킬 번역을 먼저 넣는다.
+        await session.flush()
+        for item in body.translations:
+            # 생략은 유지, `null`은 해제다 (명세 §5.7).
+            if _IMAGES in item.model_fields_set:
+                await _set_images(
+                    session,
+                    store,
+                    notice,
+                    item.language_code,
+                    item.notice_image_uri,
+                    max_bytes=settings.max_image_bytes,
+                )
     await session.flush()
     mark_changed(session, RevalidationTag.NOTICES)
     return await _respond(session, notice)
@@ -219,7 +275,7 @@ async def delete_notice(
     notice = await get_or_404(
         session, Notice, notice_id, selectinload(Notice.images), for_update=True
     )
-    await _set_images(session, store, notice, None, max_bytes=settings.max_image_bytes)
+    await _detach_all(session, store, _image_ids(notice), settings.max_image_bytes)
     await session.delete(notice)
     await session.flush()
     mark_changed(session, RevalidationTag.NOTICES)
@@ -236,8 +292,19 @@ async def delete_notice_translation(
     notice_id: ResourceId,
     language_code: LanguageCode,
     session: SessionDep,
+    store: ObjectStoreDep,
+    settings: SettingsDep,
     query: Annotated[NoQuery, Query()],
 ) -> Response:
+    """번역과 함께 그 언어의 이미지 연결도 지운다.
+
+    연결 행은 FK cascade가 지우지만 이미지는 `ATTACHED`로 남아 cleanup이
+    회수하지 못하므로, 번역 삭제가 성공한 뒤 같은 transaction에서 해제한다.
+    """
+    notice = await get_or_404(
+        session, Notice, notice_id, selectinload(Notice.images), for_update=True
+    )
+    image_ids = _image_ids(notice, language_code)
     await delete_translation(
         session,
         owner=Notice,
@@ -246,5 +313,6 @@ async def delete_notice_translation(
         owner_fk=NoticeTranslation.notice_id,
         language_code=language_code,
     )
+    await _detach_all(session, store, image_ids, settings.max_image_bytes)
     mark_changed(session, RevalidationTag.NOTICES)
     return Response(status_code=HTTPStatus.NO_CONTENT)

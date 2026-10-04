@@ -1,6 +1,7 @@
-"""`notice_image`는 공지 이미지의 순서와 중복 금지를 DB로 보장한다.
+"""`notice_image`는 공지 언어별 이미지의 순서와 중복 금지를 DB로 보장한다.
 
-`place_image`와 같은 구조다. 최소 1개 제약은 서비스 계층이 맡는다.
+순서는 공지·언어마다 매긴다. `(notice_id, language_code)` FK가 번역 없는
+언어의 이미지를 막는다. 최소 1개 제약은 서비스 계층이 맡는다.
 """
 
 import pytest
@@ -12,6 +13,12 @@ from ._data import VALID_IMAGE, VALID_ROWS, insert_row
 
 async def _notice_with_images(connection, count: int) -> list[int]:
     await insert_row(connection, "notice", VALID_ROWS["notice"])
+    for language in ("KO", "EN"):
+        await insert_row(
+            connection,
+            "notice_translation",
+            VALID_ROWS["notice_translation"] | {"language_code": language},
+        )
     return [
         await insert_row(
             connection,
@@ -26,9 +33,11 @@ async def _notice_with_images(connection, count: int) -> list[int]:
     ]
 
 
-async def _link(connection, image_id: int, seq: int) -> None:
+async def _link(connection, image_id: int, seq: int, language: str = "KO") -> None:
     await insert_row(
-        connection, "notice_image", {"notice_id": 1, "image_id": image_id, "seq": seq}
+        connection,
+        "notice_image",
+        {"notice_id": 1, "language_code": language, "image_id": image_id, "seq": seq},
     )
 
 
@@ -115,3 +124,42 @@ async def test_deleting_a_notice_removes_its_links(database) -> None:
     assert remaining == 0
     # 링크만 사라지고 image 행은 남는다. DETACHED 전이는 서비스 계층이 한다.
     assert images == 2
+
+
+async def test_each_language_numbers_its_own_sequence(database) -> None:
+    async with database.engine.begin() as connection:
+        first, second = await _notice_with_images(connection, 2)
+        await _link(connection, first, 1, "KO")
+        await _link(connection, second, 1, "EN")
+
+
+async def test_a_language_without_translation_cannot_have_images(database) -> None:
+    async with database.engine.begin() as connection:
+        first, _ = await _notice_with_images(connection, 2)
+
+    with pytest.raises(IntegrityError):
+        async with database.engine.begin() as connection:
+            await _link(connection, first, 1, "CHN")
+
+
+async def test_deleting_a_translation_removes_only_its_links(database) -> None:
+    async with database.engine.begin() as connection:
+        first, second = await _notice_with_images(connection, 2)
+        await _link(connection, first, 1, "KO")
+        await _link(connection, second, 1, "EN")
+
+    async with database.engine.begin() as connection:
+        await connection.execute(
+            text(
+                "DELETE FROM notice_translation "
+                "WHERE notice_id = 1 AND language_code = 'EN'"
+            )
+        )
+        remaining = (
+            (await connection.execute(text("SELECT image_id FROM notice_image")))
+            .scalars()
+            .all()
+        )
+
+    # image 행의 DETACHED 전이는 서비스 계층이 한다.
+    assert remaining == [first]

@@ -69,7 +69,7 @@ VALID_ROWS = {
         "content": "공지 본문",
     },
     # DB는 리소스 간 image 공유를 막지 않는다. 막는 것은 서비스 계층이다.
-    "notice_image": {"notice_id": 1, "image_id": 1, "seq": 1},
+    "notice_image": {"notice_id": 1, "language_code": "KO", "image_id": 1, "seq": 1},
     "lost_item": {"image_id": None, "is_returned": False},
     "lost_item_translation": {
         "lost_item_id": 1,
