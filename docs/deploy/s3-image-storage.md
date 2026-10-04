@@ -14,7 +14,7 @@
 - Block Public Access 네 항목을 모두 켠다.
 - 버전 관리는 켜지 않는다. 이미지는 immutable하게 다루며 교체는 새 key로
   한다. 버전이 쌓이면 cleanup이 회수하지 못하는 사본이 남는다.
-- object key prefix는 다음 다섯 개다. 다른 prefix에 쓰지 않는다.
+- object key prefix는 다음 여섯 개다. 다른 prefix에 쓰지 않는다.
 
   | 용도                | prefix                |
   | ------------------- | --------------------- |
@@ -22,6 +22,7 @@
   | `PLACE_IMAGE`       | `images/place/`       |
   | `MENU_IMAGE`        | `images/menu/`        |
   | `PERFORMANCE_IMAGE` | `images/performance/` |
+  | `NOTICE_IMAGE`      | `images/notice/`      |
   | `LOST_ITEM_IMAGE`   | `images/lost-item/`   |
 
 ## 2. CloudFront
@@ -51,7 +52,7 @@ credential만 쓴다. 설정에는 키를 받는 필드 자체가 없다.
 
 role에 부여할 최소 권한은 다음이다.
 
-- 위 다섯 prefix에 대한 `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`
+- 위 여섯 prefix에 대한 `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`
 - bucket에 대한 `s3:ListBucket` (cleanup의 고아 조회)
 
 `s3:*`와 계정 전역 리소스를 쓰지 않는다.

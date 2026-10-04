@@ -2,9 +2,9 @@
 
 | 항목              | 값                           |
 | ----------------- | ---------------------------- |
-| 문서 버전         | v0.5                         |
+| 문서 버전         | v0.6                         |
 | 작성일            | 2026-09-09                   |
-| 최종 수정일       | 2026-10-02                   |
+| 최종 수정일       | 2026-10-04                   |
 | 기준 문서         | [PRD](./PRD.md)              |
 | 대상 애플리케이션 | Customer API, Backoffice API |
 | API 버전          | v1                           |
@@ -80,8 +80,8 @@ Customer API와 Backoffice API는 별도 FastAPI 애플리케이션으로 배포
 - Customer 프론트엔드는 반환된 object key 앞에 환경별 CloudFront asset
   origin을 붙여 실제 이미지 URL을 만들며, `null`은 placeholder로
   처리한다.
-- `place_image_uri` 배열의 순서는 화면 노출 순서이며 API가 보존한다.
-  이미지가 없으면 빈 배열이 아니라 `null`이다.
+- `place_image_uri`와 `notice_image_uri` 배열의 순서는 화면 노출 순서이며
+  API가 보존한다. 이미지가 없으면 빈 배열이 아니라 `null`이다.
 - 번역의 `description`과 `found_location`, 장소 번역의 `name`과
   `host_college`는 선택이며 생략하면 빈 문자열로 저장한다. 응답에는 항상
   문자열로 포함하며 `null`이 아니다. 나머지 번역 필드는 필수다.
@@ -452,6 +452,9 @@ API가 시각으로 계산하지 않고 운영자가 Backoffice API로 갱신한
     "id": 31,
     "type": "GENERAL",
     "created_at": "2026-10-05T13:00:00+09:00",
+    "notice_image_uri": [
+        "images/notice/550e8400-e29b-41d4-a716-446655440005.webp"
+    ],
     "language_code": "KO",
     "title": "축제 운영 시간 안내",
     "content": "부스는 오전 10시부터 운영합니다."
@@ -468,14 +471,18 @@ API가 시각으로 계산하지 않고 운영자가 Backoffice API로 갱신한
 
 공지 응답 필드는 다음과 같다.
 
-| 필드            | 타입            | 설명                       |
-| --------------- | --------------- | -------------------------- |
-| `id`            | integer         | 공지 ID                    |
-| `type`          | string enum     | `PERMANENT` 또는 `GENERAL` |
-| `created_at`    | datetime string | 서버가 기록한 생성 시각    |
-| `language_code` | string enum     | 반환된 번역 언어           |
-| `title`         | string          | 공지 제목                  |
-| `content`       | string          | 공지 본문                  |
+| 필드               | 타입             | 설명                                                                 |
+| ------------------ | ---------------- | -------------------------------------------------------------------- |
+| `id`               | integer          | 공지 ID                                                              |
+| `type`             | string enum      | `PERMANENT` 또는 `GENERAL`                                           |
+| `created_at`       | datetime string  | 서버가 기록한 생성 시각                                              |
+| `notice_image_uri` | string[] \| null | `NOTICE_IMAGE` 업로드로 받은 object key 목록, 이미지가 없으면 `null` |
+| `language_code`    | string enum      | 반환된 번역 언어                                                     |
+| `title`            | string           | 공지 제목                                                            |
+| `content`          | string           | 공지 본문                                                            |
+
+목록, 최근 공지, 상세 응답 모두 같은 필드를 가진다. 이미지는 번역과
+무관하므로 요청 언어와 상관없이 같은 배열을 반환한다.
 
 일반 공지 목록 응답 예시:
 
@@ -486,6 +493,9 @@ API가 시각으로 계산하지 않고 운영자가 Backoffice API로 갱신한
             "id": 31,
             "type": "GENERAL",
             "created_at": "2026-10-05T13:00:00+09:00",
+            "notice_image_uri": [
+                "images/notice/550e8400-e29b-41d4-a716-446655440005.webp"
+            ],
             "language_code": "KO",
             "title": "축제 운영 시간 안내",
             "content": "부스는 오전 10시부터 운영합니다."
@@ -724,6 +734,7 @@ presigned PUT URL과 object key를 반환한다. 이미지 binary는 FastAPI를
 | `PLACE_IMAGE`       | `PLACE.place_image_uri[]`    | `images/place/`       |
 | `MENU_IMAGE`        | `MENU.image_url`             | `images/menu/`        |
 | `PERFORMANCE_IMAGE` | `PERFORMANCE.image_uri`      | `images/performance/` |
+| `NOTICE_IMAGE`      | `NOTICE.notice_image_uri[]`  | `images/notice/`      |
 | `LOST_ITEM_IMAGE`   | `LOST_ITEM.image_url`        | `images/lost-item/`   |
 
 URL 발급 제한:
@@ -810,10 +821,12 @@ bucket CORS에는 허용 origin, `PUT`, `Content-Type`,
 5. 검증과 DB transaction이 성공하면 저장된 object key를 포함한
    기본 리소스를 반환한다.
 
-`PLACE.place_image_uri`의 이미지가 여러 개면 파일마다 업로드 API를
-호출하고 반환된 key들을 노출 순서대로 배열에 넣는다. 배열을 보낼 때는
-서로 다른 key를 1개 이상 포함해야 한다. 이미지가 없는 장소는 빈 배열이
-아니라 `null`로 표현한다.
+`PLACE.place_image_uri`와 `NOTICE.notice_image_uri`는 이미지 배열이다.
+이미지가 여러 개면 파일마다 업로드 API를 호출하고 반환된 key들을 노출
+순서대로 배열에 넣는다. 배열을 보낼 때는 서로 다른 key를 1개 이상
+포함해야 한다. 이미지가 없는 리소스는 빈 배열이 아니라 `null`로 표현한다.
+`PATCH`로 배열을 보내면 저장된 배열 전체를 그 값으로 바꾸며, 새 배열에서
+빠진 key만 연결을 해제한다.
 
 `PATCH`에 이미지 필드로 `null`을 보내면 기존 연결을 해제한다. 해제된
 object key는 참조가 제거된 객체로 보고 아래 수명 주기 규칙을 따른다.
@@ -821,7 +834,7 @@ object key는 참조가 제거된 객체로 보고 아래 수명 주기 규칙�
 하나의 object key는 하나의 기본 리소스에서만 사용할 수 있다.
 
 - 다른 리소스에 이미 연결된 key는 `409 IMAGE_ALREADY_ATTACHED`다.
-- 같은 `place_image_uri` 배열에 key가 중복되면
+- 같은 `place_image_uri` 또는 `notice_image_uri` 배열에 key가 중복되면
   `422 INVALID_IMAGE`다.
 - field와 key prefix가 맞지 않거나 객체가 없으면
   `422 INVALID_IMAGE`다.
@@ -1390,12 +1403,24 @@ PATCH /api/v1/places/10
 
 기본 리소스:
 
-| 필드           | 타입                | POST          | PATCH               | 설명                       |
-| -------------- | ------------------- | ------------- | ------------------- | -------------------------- |
-| `id`           | integer             | 서버 생성     | 수정 불가           | 공지 ID                    |
-| `type`         | string enum         | 필수          | 선택                | `PERMANENT` 또는 `GENERAL` |
-| `created_at`   | datetime string     | 서버 생성     | 수정 불가           | 생성 시각                  |
-| `translations` | NoticeTranslation[] | 필수, KO 포함 | 선택, 언어별 upsert | 전체 번역                  |
+| 필드               | 타입                | POST          | PATCH               | 설명                                       |
+| ------------------ | ------------------- | ------------- | ------------------- | ------------------------------------------ |
+| `id`               | integer             | 서버 생성     | 수정 불가           | 공지 ID                                    |
+| `type`             | string enum         | 필수          | 선택                | `PERMANENT` 또는 `GENERAL`                 |
+| `created_at`       | datetime string     | 서버 생성     | 수정 불가           | 생성 시각                                  |
+| `notice_image_uri` | string[] \| null    | 선택          | 선택                | 순서가 보존되는 이미지 목록, 기본값 `null` |
+| `translations`     | NoticeTranslation[] | 필수, KO 포함 | 선택, 언어별 upsert | 전체 번역                                  |
+
+`notice_image_uri`는 `place_image_uri`(5.4)와 같은 규칙을 따른다. 이미지가
+없음을 `null`로 표현하며, 배열을 보낼 때 다음을 위반하면
+`422 VALIDATION_ERROR`다.
+
+- 빈 배열 `[]`은 허용하지 않는다. 이미지가 없으면 `null`을 보낸다.
+- 배열 원소는 `null`일 수 없다.
+- 중첩 배열은 허용하지 않는다. 1차원 문자열 배열만 받는다.
+
+key 검증과 연결·해제는 4.6을 따른다. `PATCH`에 `null`을 보내면 모든
+이미지 연결을 해제하고, 생략하면 저장된 배열을 유지한다.
 
 `NoticeTranslation`:
 
@@ -1412,6 +1437,10 @@ PATCH /api/v1/places/10
 ```json
 {
     "type": "PERMANENT",
+    "notice_image_uri": [
+        "images/notice/550e8400-e29b-41d4-a716-446655440006.webp",
+        "images/notice/550e8400-e29b-41d4-a716-446655440007.webp"
+    ],
     "translations": [
         {
             "language_code": "KO",
@@ -1439,6 +1468,10 @@ PATCH /api/v1/places/10
     "id": 42,
     "type": "PERMANENT",
     "created_at": "2026-10-05T13:00:00+09:00",
+    "notice_image_uri": [
+        "images/notice/550e8400-e29b-41d4-a716-446655440006.webp",
+        "images/notice/550e8400-e29b-41d4-a716-446655440007.webp"
+    ],
     "translations": [
         {
             "id": 201,
@@ -1498,7 +1531,7 @@ PATCH /api/v1/places/10
 | Place       | PlaceTranslation, 하위 Menu, 각 MenuTranslation을 모두 연쇄 삭제한다.                                                                                           |
 | Menu        | MenuTranslation을 연쇄 삭제한다.                                                                                                                                |
 | Performance | PerformanceTranslation을 연쇄 삭제한다. `is_live=true`였다면 live 공연이 없는 상태가 된다. 같은 일차의 남은 공연은 `seq`가 `1`부터 연속이 되도록 다시 매겨진다. |
-| Notice      | NoticeTranslation을 연쇄 삭제한다.                                                                                                                              |
+| Notice      | NoticeTranslation과 이미지 연결을 연쇄 삭제한다. 연결됐던 이미지는 `DETACHED`가 되어 cleanup 대상이 된다.                                                       |
 | LostItem    | LostItemTranslation을 연쇄 삭제한다.                                                                                                                            |
 
 존재하지 않는 ID의 삭제는 `404 RESOURCE_NOT_FOUND`다. 성공한 삭제는 빈
@@ -1595,13 +1628,15 @@ Bearer 인증이 필요하다.
 | LOST_ITEM               | 선택 언어 분실물 필드                                     | 기본 필드와 `translations`      |
 | LOST_ITEM_TRANSLATION   | `language_code`, `title`, `description`, `found_location` | 자식 ID와 FK를 포함한 번역 배열 |
 
-이미지 업로드는 ERD에 `IMAGE`와 `PLACE_IMAGE` 두 엔티티를 추가한다.
+이미지 업로드는 ERD에 `IMAGE`, `PLACE_IMAGE`, `NOTICE_IMAGE` 세 엔티티를
+추가한다.
 `IMAGE`는 object key와 업로드 상태를 소유하고 `s3_key`에 unique 제약을
 두어 하나의 key가 하나의 기본 리소스에만 연결되도록 강제한다.
 `CATEGORY.category_icon_uri`, `MENU.image_url`, `PERFORMANCE.image_uri`,
 `LOST_ITEM.image_url`은 `IMAGE`를 참조하는 nullable FK가 되고,
-`PLACE.place_image_uri`는 순서를 갖는 `PLACE_IMAGE` 연결 엔티티로
-대체된다. API 요청과 응답은 이 변경과 무관하게 object key 문자열을
+`PLACE.place_image_uri`와 `NOTICE.notice_image_uri`는 각각 순서를 갖는
+`PLACE_IMAGE`, `NOTICE_IMAGE` 연결 엔티티로 대체된다. 두 연결 엔티티는
+`image_id`에 unique, `(부모 ID, seq)`에 deferrable unique 제약을 둔다. API 요청과 응답은 이 변경과 무관하게 object key 문자열을
 주고받으며 `image_id`를 노출하지 않는다.
 
 `PERFORMANCE`의 `start_at`과 `end_at`은 ERD에서 제거하고 `date`, `seq`,
@@ -1670,8 +1705,8 @@ migration이 입력하며, 배포 시 migration 단계에서 함께 반영된다
     `422 VALIDATION_ERROR`다. 시작과 종료가 같은 값이면 허용된다.
 17. 이미지 필드를 생략하거나 `null`로 보낸 `POST`는 성공하고, 응답의
     해당 필드는 `null`이다.
-18. `place_image_uri`에 빈 배열 `[]`, `null` 원소 또는 중첩 배열을
-    보내면 `422 VALIDATION_ERROR`다.
+18. `place_image_uri` 또는 `notice_image_uri`에 빈 배열 `[]`, `null` 원소
+    또는 중첩 배열을 보내면 `422 VALIDATION_ERROR`다.
 19. 이미지 필드에 `null`을 보낸 `PATCH`는 연결을 해제하고, 해제된
     object key는 cleanup 대상이 된다.
 20. 번역의 `description`과 `found_location`을 생략한 요청은 성공하고
@@ -1731,3 +1766,11 @@ migration이 입력하며, 배포 시 migration 단계에서 함께 반영된다
 45. 카테고리가 없는 장소는 여러 개 있어도 구역 번호 중복으로 보지 않는다.
 46. migration 직후 Category는 5.3 표의 6개 행과 각 KO·EN·CHN 번역을
     가지며, `PATCH`로 `code`를 보내면 `422 VALIDATION_ERROR`다.
+47. 공지 `POST`·`PATCH`에 보낸 `notice_image_uri` 순서가 Backoffice와
+    Customer 응답(목록, 최근 공지, 상세)에 그대로 유지되고, 이미지가 없는
+    공지는 `null`이다.
+48. 공지 `PATCH`로 `notice_image_uri` 배열을 바꾸면 새 배열에서 빠진
+    이미지만 `DETACHED`가 되고, 공지를 삭제하면 연결됐던 이미지가 모두
+    `DETACHED`가 된다.
+49. `notice_image_uri`에 `images/notice/`가 아닌 prefix의 key를 보내면
+    `422 INVALID_IMAGE`다.
