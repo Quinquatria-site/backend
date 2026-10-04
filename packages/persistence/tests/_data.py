@@ -27,6 +27,7 @@ VALID_ROWS = {
     "place": {
         "category_id": 1,
         "category_sequence": 1,
+        "is_polygon": False,
         "x": 12.25,
         "y": -7.5,
         "start_hour": INSTANT,
@@ -97,8 +98,15 @@ NULLABLE_IMAGE_COLUMNS = {
 PLACE_PAIRS = (("category_id", "category_sequence"), ("start_hour", "end_hour"))
 """좌표만 있는 장소를 위해 비울 수 있되, 둘씩 함께 비워야 하는 컬럼 (명세 §5.4)."""
 
+PLACE_SHAPE_COLUMNS = ("x", "y", "area")
+"""`is_polygon`에 따라 한쪽만 채우는 위치 컬럼 (명세 §5.4)."""
+
 NULLABLE_COLUMNS = NULLABLE_IMAGE_COLUMNS | {
-    ("place", column) for pair in PLACE_PAIRS for column in pair
+    ("place", column)
+    for column in (
+        *PLACE_SHAPE_COLUMNS,
+        *(name for pair in PLACE_PAIRS for name in pair),
+    )
 }
 
 DEFAULT_EMPTY_COLUMNS = {

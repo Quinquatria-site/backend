@@ -37,6 +37,7 @@ from .enums import (
     NoticeType,
     PerformanceType,
 )
+from .geometry import Polygon, Vertex
 
 _OWNED_CASCADE = "save-update, merge, delete, delete-orphan"
 _language_code_type = SQLAlchemyEnum(
@@ -160,6 +161,12 @@ class CategoryTranslation(_IdentityMixin, Base):
 
 
 class Place(_IdentityMixin, Base):
+    """지도 위 장소. `is_polygon`이 위치 표현을 정한다.
+
+    점 장소는 `x`, `y` 한 점이고, 구역 장소는 `area` 다각형(꼭짓점 3개 이상)이다.
+    쓰지 않는 쪽은 NULL이다.
+    """
+
     __tablename__ = "place"
     __table_args__ = (
         CheckConstraint("id > 0", name="id_positive"),
@@ -173,6 +180,14 @@ class Place(_IdentityMixin, Base):
         CheckConstraint(
             "(start_hour IS NULL) = (end_hour IS NULL)", name="hours_paired"
         ),
+        # 점 장소는 x·y만, 구역 장소는 area만 쓴다 (명세 §5.4).
+        CheckConstraint(
+            "CASE WHEN is_polygon "
+            "THEN area IS NOT NULL AND x IS NULL AND y IS NULL "
+            "ELSE area IS NULL AND x IS NOT NULL AND y IS NOT NULL END",
+            name="shape_matches",
+        ),
+        CheckConstraint("npoints(area) >= 3", name="area_vertices"),
         # 구역 번호(A1 …)가 두 장소에 붙지 않게 한다. 요청 하나가 한 행만 바꾸므로
         # `place_image`와 달리 지연하지 않는다 (명세 §5.4, §8).
         UniqueConstraint("category_id", "category_sequence"),
@@ -183,8 +198,12 @@ class Place(_IdentityMixin, Base):
         ForeignKey("category.id", ondelete="RESTRICT")
     )
     category_sequence: Mapped[int | None] = mapped_column(Integer)
-    x: Mapped[float] = mapped_column(Double)
-    y: Mapped[float] = mapped_column(Double)
+    # 기본값을 Python에도 둬야 flush 뒤 읽을 때 lazy load(async 불가)가 나지 않는다.
+    is_polygon: Mapped[bool] = mapped_column(default=False, server_default=false())
+    x: Mapped[float | None] = mapped_column(Double)
+    y: Mapped[float | None] = mapped_column(Double)
+    # 목록 안을 고쳐도 변경으로 추적하지 않는다. 새 목록을 통째로 대입한다.
+    area: Mapped[list[Vertex] | None] = mapped_column(Polygon())
     start_hour: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     end_hour: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

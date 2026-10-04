@@ -9,6 +9,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StrictBool,
     StrictFloat,
     StrictInt,
     StrictStr,
@@ -80,16 +81,48 @@ type PlaceImageKeys = Annotated[list[StrictStr], Field(min_length=1)]
 """빈 배열 대신 `null`로 "이미지 없음"을 표현한다 (명세 §5.4)."""
 
 
+class VertexIn(RequestModel):
+    x: Coordinate
+    y: Coordinate
+
+
+type Area = Annotated[list[VertexIn], Field(min_length=3)]
+"""구역 꼭짓점. 첫 점을 끝에 반복하지 않아도 닫힌 다각형이다 (명세 §5.4)."""
+
+
 PLACE_PAIRS = (("category_id", "category_sequence"), ("start_hour", "end_hour"))
 """함께 있거나 함께 비어야 하는 장소 필드 (명세 §5.4)."""
 
+PLACE_SHAPE_FIELDS = ("is_polygon", "x", "y", "area")
+"""위치 표현을 판정할 때 함께 보는 장소 필드 (명세 §5.4)."""
+
+
+def _shape_errors(values: dict[str, object]) -> list[ErrorDetail]:
+    """점 장소는 `x`·`y`만, 구역 장소는 `area`만 값이 있어야 한다."""
+    if values["is_polygon"]:
+        required, forbidden, kind = ("area",), ("x", "y"), "구역"
+    else:
+        required, forbidden, kind = ("x", "y"), ("area",), "점"
+    return [
+        ErrorDetail(field=field, reason=f"{kind} 장소에는 값이 필요합니다.")
+        for field in required
+        if values[field] is None
+    ] + [
+        ErrorDetail(field=field, reason=f"{kind} 장소에는 값을 둘 수 없습니다.")
+        for field in forbidden
+        if values[field] is not None
+    ]
+
 
 def ensure_place_rules(values: dict[str, object]) -> None:
-    """요청 반영 후 장소 값으로 짝과 시각 순서를 판정한다. 위반은 422다.
+    """요청 반영 후 장소 값으로 위치 표현·짝·시각 순서를 판정한다. 위반은 422다.
 
-    `PATCH`는 한쪽만 보낼 수 있어 기존 값과 합친 결과로 판정해야 하므로,
+    `PATCH`는 일부만 보낼 수 있어 기존 값과 합친 결과로 판정해야 하므로,
     본문 검증기가 아니라 라우트에서 부른다.
     """
+    shape = _shape_errors(values)
+    if shape:
+        raise ApiError(ErrorCode.VALIDATION_ERROR, details=shape)
     missing = [
         second if values[second] is None else first
         for first, second in PLACE_PAIRS
@@ -122,10 +155,15 @@ class PlaceTranslationIn(TranslationIn):
 
 
 class PlaceCreate(RequestModel):
-    """좌표만 필수다. 나머지는 생성 뒤 `PATCH`로 채울 수 있다 (명세 §5.4)."""
+    """위치만 필수다. 나머지는 생성 뒤 `PATCH`로 채울 수 있다 (명세 §5.4).
 
-    x: Coordinate
-    y: Coordinate
+    점 장소는 `x`, `y`를, 구역 장소(`is_polygon: true`)는 `area`를 보낸다.
+    """
+
+    is_polygon: StrictBool = False
+    x: Coordinate | None = None
+    y: Coordinate | None = None
+    area: Area | None = None
     category_id: ParentId | None = None
     category_sequence: Position | None = None
     start_hour: AwareDatetime | None = None
@@ -143,12 +181,19 @@ class PlaceTranslationOut(ResponseModel):
     description: str
 
 
+class VertexOut(ResponseModel):
+    x: float
+    y: float
+
+
 class PlaceOut(ResponseModel):
     id: int
     category_id: int | None
     category_sequence: int | None
-    x: float
-    y: float
+    is_polygon: bool
+    x: float | None
+    y: float | None
+    area: list[VertexOut] | None
     start_hour: UtcDatetime | None
     end_hour: UtcDatetime | None
     place_image_uri: list[str] | None
@@ -157,13 +202,21 @@ class PlaceOut(ResponseModel):
 
 class PlacePatch(PatchModel):
     NULLABLE = frozenset(
-        {"place_image_uri", *(name for pair in PLACE_PAIRS for name in pair)}
+        {
+            "place_image_uri",
+            "x",
+            "y",
+            "area",
+            *(name for pair in PLACE_PAIRS for name in pair),
+        }
     )
 
     category_id: ParentId | None = None
     category_sequence: Position | None = None
+    is_polygon: StrictBool | None = None
     x: Coordinate | None = None
     y: Coordinate | None = None
+    area: Area | None = None
     start_hour: AwareDatetime | None = None
     end_hour: AwareDatetime | None = None
     place_image_uri: PlaceImageKeys | None = None

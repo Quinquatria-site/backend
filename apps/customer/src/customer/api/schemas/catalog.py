@@ -1,6 +1,6 @@
 """API 명세 §3.2, §3.3의 카테고리·장소·메뉴 조회 계약."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from common.enums import CategoryCode, LanguageCode
 from common.query import ListQuery
@@ -29,14 +29,26 @@ class MenuResponse(BaseModel):
     description: str
 
 
+class VertexResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    x: float
+    y: float
+
+
 class PlaceResponse(BaseModel):
-    """좌표만 있는 장소도 빈 마커로 내보낸다. 아직 채우지 않은 값은 `null`이다."""
+    """위치만 있는 장소도 빈 마커로 내보낸다. 아직 채우지 않은 값은 `null`이다.
+
+    점 장소는 `x`, `y`가, 구역 장소(`is_polygon`)는 `area`가 위치다.
+    """
 
     id: ResourceId
     category_id: ResourceId | None
     category_sequence: int | None
-    x: float
-    y: float
+    is_polygon: bool
+    x: float | None
+    y: float | None
+    area: list[VertexResponse] | None
     start_hour: AwareDatetime | None
     end_hour: AwareDatetime | None
     place_image_uri: list[str] | None

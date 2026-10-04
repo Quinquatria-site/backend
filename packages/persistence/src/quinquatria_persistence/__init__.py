@@ -11,6 +11,7 @@ from quinquatria_persistence.enums import (
     NoticeType,
     PerformanceType,
 )
+from quinquatria_persistence.geometry import Vertex
 from quinquatria_persistence.models import (
     Category,
     CategoryTranslation,
@@ -54,4 +55,5 @@ __all__ = [
     "Place",
     "PlaceImage",
     "PlaceTranslation",
+    "Vertex",
 ]

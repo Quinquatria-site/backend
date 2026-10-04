@@ -89,9 +89,9 @@ async def seed_places(session: AsyncSession, places: Sequence[SeedPlace]) -> See
     for category_id, sequence, x, y in existing:
         place = wanted.pop((category_id, sequence))
         if (place.x, place.y) != (x, y):
-            raise SeedConflict(
-                f"{place.code} {sequence}이 이미 다른 좌표({x}, {y})에 있습니다."
-            )
+            # 시드는 점 장소만 넣는다. 구역 장소는 x·y가 비어 있다.
+            where = "구역 장소로" if x is None else f"다른 좌표({x}, {y})에"
+            raise SeedConflict(f"{place.code} {sequence}이 이미 {where} 있습니다.")
         skipped += 1
 
     session.add_all(

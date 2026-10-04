@@ -55,6 +55,8 @@ API는 #6, 공지 조회 API는 #10, 분실물 조회 API는 #13의 구현 범�
 - 카테고리는 `id ASC`, 장소는 `category_id ASC, category_sequence ASC,
   id ASC`로 정렬합니다. `category_id`는 양수 ID이며 해당 카테고리에 조회할
   장소가 없으면 빈 목록을 반환합니다.
+- 장소 위치는 `is_polygon`이 `false`면 `x`, `y`, `true`면 `area` 꼭짓점
+  배열(`[{"x", "y"}, ...]`, 순서 보존)입니다. 쓰지 않는 쪽은 `null`입니다.
 - 장소 상세는 목록 항목의 필드에 `menus`를 추가합니다. 메뉴는 `id ASC`로
   정렬하며 요청 언어 번역이 없는 메뉴만 제외합니다. 메뉴가 없으면 `[]`입니다.
 - 이미지 필드는 저장된 S3 object key 또는 `null`을 반환합니다.

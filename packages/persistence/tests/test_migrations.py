@@ -57,6 +57,10 @@ def assert_schema(connection):
             assert columns["updated_at"]["default"] is not None
         elif table == "performance":
             assert columns["is_live"]["default"] == "false"
+        elif table == "place":
+            # 구역 장소만 쓰는 열이라 VALID_ROWS의 점 장소에는 없다.
+            expected_fields.add("area")
+            assert columns["is_polygon"]["default"] == "false"
         assert set(columns) == expected_fields
         assert {
             (table, column["name"]) for column in columns.values() if column["nullable"]
@@ -261,7 +265,7 @@ def test_upgrade_refuses_categories_that_do_not_match_the_seed(
 
 def test_downgrade_refuses_while_notice_images_exist(migration_engine, alembic_config):
     """enum 값을 지우면 그 값을 쓰는 image 행을 옮길 곳이 없다."""
-    command.upgrade(alembic_config, "head")
+    command.upgrade(alembic_config, "0007_notice_image")
     with migration_engine.begin() as connection:
         connection.execute(
             text(
@@ -278,4 +282,37 @@ def test_downgrade_refuses_while_notice_images_exist(migration_engine, alembic_c
         assert (
             connection.scalar(text("SELECT version_num FROM alembic_version"))
             == "0007_notice_image"
+        )
+
+
+def test_upgrade_turns_existing_places_into_points(migration_engine, alembic_config):
+    command.upgrade(alembic_config, "0007_notice_image")
+    with migration_engine.begin() as connection:
+        connection.execute(text("INSERT INTO place (x, y) VALUES (1.5, 2.5)"))
+
+    command.upgrade(alembic_config, "head")
+
+    with migration_engine.connect() as connection:
+        row = connection.execute(text("SELECT is_polygon, x, y, area FROM place"))
+        assert tuple(row.one()) == (False, 1.5, 2.5, None)
+
+
+def test_downgrade_refuses_while_polygon_places_exist(migration_engine, alembic_config):
+    """x·y가 다시 필수가 되면 구역 장소를 옮길 좌표가 없다."""
+    command.upgrade(alembic_config, "head")
+    with migration_engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO place (is_polygon, area) "
+                "VALUES (true, '((0,0),(1,0),(1,1))')"
+            )
+        )
+
+    with pytest.raises(Exception, match="polygon"):
+        command.downgrade(alembic_config, "0007_notice_image")
+
+    with migration_engine.connect() as connection:
+        assert (
+            connection.scalar(text("SELECT version_num FROM alembic_version"))
+            == "0008_place_polygon_area"
         )

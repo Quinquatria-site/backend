@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from quinquatria_persistence import CategoryCode, LanguageCode
+from quinquatria_persistence import CategoryCode, LanguageCode, Vertex
 
 START = datetime(2026, 10, 6, 1, tzinfo=UTC)
 
@@ -31,8 +31,10 @@ def _place_row(
         "id": resource_id,
         "category_id": category_id,
         "category_sequence": sequence,
+        "is_polygon": False,
         "x": 127.42,
         "y": 36.18,
+        "area": None,
         "start_hour": START,
         "end_hour": START + timedelta(hours=12),
         "place_image_uri": images,
@@ -316,8 +318,10 @@ def test_detail_returns_exact_place_and_menu_fields(
         "id",
         "category_id",
         "category_sequence",
+        "is_polygon",
         "x",
         "y",
+        "area",
         "start_hour",
         "end_hour",
         "place_image_uri",
@@ -328,7 +332,8 @@ def test_detail_returns_exact_place_and_menu_fields(
         "menus",
     }
     assert (body["id"], body["category_id"], body["category_sequence"]) == (40, 10, 1)
-    assert (body["x"], body["y"]) == (127.42, 36.18)
+    assert (body["is_polygon"], body["x"], body["y"]) == (False, 127.42, 36.18)
+    assert body["area"] is None
     assert (body["name"], body["host_college"], body["description"]) == (
         "place-40-EN",
         "college-EN",
@@ -406,8 +411,10 @@ _EMPTY_MARKER = {
     "id": 40,
     "category_id": None,
     "category_sequence": None,
+    "is_polygon": False,
     "x": 127.42,
     "y": 36.18,
+    "area": None,
     "start_hour": None,
     "end_hour": None,
     "place_image_uri": None,
@@ -535,3 +542,41 @@ def test_openapi_describes_query_and_response_contracts(customer_client):
         "$ref"
     ].endswith("/ErrorResponse")
     assert {"/api/v1/", *expected_queries}.issubset(paths)
+
+
+@pytest.mark.parametrize("path", ["places", "places/40"])
+def test_polygon_place_returns_area_without_point(
+    customer_client, mock_session, execute_result, path
+):
+    """구역 장소는 `area` 꼭짓점 순서대로 내보내고 `x`, `y`는 null이다 (명세 §3.3)."""
+    row = {
+        **_place_row(40),
+        "is_polygon": True,
+        "x": None,
+        "y": None,
+        "area": [Vertex(10.0, 20.0), Vertex(30.5, 20.0), Vertex(30.5, 40.25)],
+    }
+    mock_session.scalar.return_value = 1
+    mock_session.execute.side_effect = [execute_result(row), execute_result()]
+
+    body = customer_client.get(f"/api/v1/{path}").json()
+    place = body["items"][0] if path == "places" else body
+
+    assert (place["is_polygon"], place["x"], place["y"]) == (True, None, None)
+    assert place["area"] == [
+        {"x": 10.0, "y": 20.0},
+        {"x": 30.5, "y": 20.0},
+        {"x": 30.5, "y": 40.25},
+    ]
+
+
+def test_places_query_selects_shape_columns(
+    customer_client, mock_session, execute_result, compiled_sql
+):
+    mock_session.scalar.return_value = 1
+    mock_session.execute.return_value = execute_result(_place_row(40))
+
+    customer_client.get("/api/v1/places")
+
+    sql = compiled_sql(mock_session.execute.await_args.args[0])
+    assert "place.is_polygon, place.x, place.y, place.area" in sql
