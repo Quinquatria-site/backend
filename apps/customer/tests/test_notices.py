@@ -14,11 +14,13 @@ def _notice_row(
     language: str | None,
     *,
     hours: int = 0,
+    images: list[str] | None = None,
 ):
     return {
         "id": resource_id,
         "type": notice_type,
         "created_at": FIRST + timedelta(hours=hours),
+        "notice_image_uri": images,
         "language_code": language,
         "title": None if language is None else f"notice-{resource_id}-{language}",
         "content": None if language is None else f"content-{resource_id}-{language}",
@@ -31,7 +33,8 @@ def _set_page(mock_session, execute_result, total, *rows):
 
 
 def _assert_unpaginated_count(sql: str):
-    assert "ORDER BY" not in sql
+    # 이미지 집계 안의 ORDER BY notice_image.seq는 페이지 정렬이 아니다.
+    assert "ORDER BY notice." not in sql
     assert "LIMIT" not in sql
     assert "OFFSET" not in sql
 
@@ -200,6 +203,7 @@ def test_detail_returns_both_types_and_requested_languages(
         "id": 20,
         "type": notice_type,
         "created_at": response.json()["created_at"],
+        "notice_image_uri": None,
         "language_code": language,
         "title": f"notice-20-{language}",
         "content": f"content-20-{language}",
@@ -268,6 +272,7 @@ def test_latest_uses_static_route_and_selects_base_general_before_translation(
         "id": 40,
         "type": "GENERAL",
         "created_at": response.json()["created_at"],
+        "notice_image_uri": None,
         "language_code": "EN",
         "title": "notice-40-EN",
         "content": "content-40-EN",
@@ -401,3 +406,46 @@ def test_openapi_describes_notice_query_and_response_contracts(customer_client):
     latest = paths["/api/v1/notices/latest"]["get"]
     assert "content" not in latest["responses"]["204"]
     assert set(expected_queries).issubset(paths)
+
+
+IMAGES = ["images/notice/second.webp", "images/notice/first.webp"]
+IMAGE_AGGREGATE = (
+    "array_agg(image.s3_key ORDER BY notice_image.seq) AS notice_image_uri"
+)
+IMAGE_JOIN = "AS notice_images ON notice_images.notice_id = notice.id"
+
+
+def test_notice_images_keep_key_order_across_list_latest_and_detail(
+    customer_client, mock_session, execute_result
+):
+    row = _notice_row(70, "GENERAL", "KO", images=IMAGES)
+    mock_session.execute.return_value = execute_result(row)
+    detail = customer_client.get("/api/v1/notices/70").json()
+    latest = customer_client.get("/api/v1/notices/latest").json()
+
+    mock_session.scalar.return_value = 1
+    listed = customer_client.get("/api/v1/notices").json()["items"][0]
+
+    assert detail == latest == listed
+    assert detail["notice_image_uri"] == IMAGES
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["notices", "notices/permanent", "notices/latest", "notices/20"],
+)
+def test_every_notice_query_aggregates_images_in_display_order(
+    customer_client, mock_session, execute_result, compiled_sql, path
+):
+    mock_session.scalar.return_value = 1
+    mock_session.execute.return_value = execute_result(_notice_row(20, "GENERAL", "KO"))
+
+    response = customer_client.get(f"/api/v1/{path}")
+
+    assert response.status_code == 200
+    assert response.json().get("notice_image_uri", "absent") in (None, "absent")
+    sql = compiled_sql(mock_session.execute.await_args.args[0])
+    assert IMAGE_AGGREGATE in sql
+    # 이미지가 없는 공지도 빠지지 않도록 외부 조인한다.
+    assert "LEFT OUTER JOIN (SELECT notice_image.notice_id" in sql
+    assert IMAGE_JOIN in sql

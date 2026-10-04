@@ -10,6 +10,7 @@ class NoticeResponse(BaseModel):
     id: ResourceId
     type: NoticeType
     created_at: AwareDatetime
+    notice_image_uri: list[str] | None
     language_code: LanguageCode
     title: str
     content: str

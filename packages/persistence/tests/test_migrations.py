@@ -19,6 +19,7 @@ EXPECTED_ENUMS = {
         "MENU_IMAGE",
         "PERFORMANCE_IMAGE",
         "LOST_ITEM_IMAGE",
+        "NOTICE_IMAGE",
     ],
     "image_content_type": ["image/jpeg", "image/png", "image/webp"],
     "image_status": ["UPLOADING", "UPLOADED", "ATTACHED", "DETACHED"],
@@ -31,6 +32,7 @@ EXPECTED_INDEXES = {
     "menu": {("place_id", "id")},
     "performance": {("date", "seq", "id"), ("type", "date", "seq", "id")},
     "notice": {("created_at", "id"), ("type", "created_at", "id")},
+    "notice_image": {("notice_id", "seq")},
     "lost_item": {("created_at", "id"), ("is_returned", "created_at", "id")},
     "image": {("status", "created_at"), ("status", "detached_at")},
 }
@@ -193,7 +195,7 @@ def test_upgrade_seeds_the_fixed_categories(migration_engine, alembic_config):
 
 def test_downgrade_and_reupgrade_keeps_the_seed(migration_engine, alembic_config):
     command.upgrade(alembic_config, "head")
-    command.downgrade(alembic_config, "-1")
+    command.downgrade(alembic_config, "0005_performance_date_seq")
     command.upgrade(alembic_config, "head")
     with migration_engine.connect() as connection:
         assert _categories(connection) == SEEDED_CATEGORIES
@@ -254,4 +256,26 @@ def test_upgrade_refuses_categories_that_do_not_match_the_seed(
         assert (
             connection.scalar(text("SELECT version_num FROM alembic_version"))
             == "0005_performance_date_seq"
+        )
+
+
+def test_downgrade_refuses_while_notice_images_exist(migration_engine, alembic_config):
+    """enum 값을 지우면 그 값을 쓰는 image 행을 옮길 곳이 없다."""
+    command.upgrade(alembic_config, "head")
+    with migration_engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO image (s3_key, resource_type, content_type, "
+                "declared_size, status) VALUES ('images/notice/a.webp', "
+                "'NOTICE_IMAGE', 'image/webp', 1, 'UPLOADING')"
+            )
+        )
+
+    with pytest.raises(Exception, match="NOTICE_IMAGE"):
+        command.downgrade(alembic_config, "0006_place_coordinate_first")
+
+    with migration_engine.connect() as connection:
+        assert (
+            connection.scalar(text("SELECT version_num FROM alembic_version"))
+            == "0007_notice_image"
         )

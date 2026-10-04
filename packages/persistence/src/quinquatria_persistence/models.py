@@ -369,6 +369,12 @@ class Notice(_IdentityMixin, Base):
         lazy="raise",
         order_by=lambda: (NoticeTranslation.language_code, NoticeTranslation.id),
     )
+    images: Mapped[list[NoticeImage]] = relationship(
+        back_populates="notice",
+        cascade=_OWNED_CASCADE,
+        order_by="NoticeImage.seq",
+        lazy="raise",
+    )
 
 
 class NoticeTranslation(_IdentityMixin, Base):
@@ -384,6 +390,24 @@ class NoticeTranslation(_IdentityMixin, Base):
     content: Mapped[str] = mapped_column(Text)
 
     notice: Mapped[Notice] = relationship(back_populates="translations", lazy="raise")
+
+
+class NoticeImage(_IdentityMixin, Base):
+    """공지와 이미지의 순서 있는 연결. 제약은 `PlaceImage`와 같은 이유로 둔다."""
+
+    __tablename__ = "notice_image"
+    __table_args__ = (
+        CheckConstraint("id > 0", name="id_positive"),
+        CheckConstraint("seq >= 1", name="seq_positive"),
+        UniqueConstraint("notice_id", "seq", deferrable=True, initially="DEFERRED"),
+        Index(None, "notice_id", "seq"),
+    )
+
+    notice_id: Mapped[int] = mapped_column(ForeignKey("notice.id", ondelete="CASCADE"))
+    image_id: Mapped[int] = mapped_column(ForeignKey("image.id"), unique=True)
+    seq: Mapped[int] = mapped_column(Integer)
+
+    notice: Mapped[Notice] = relationship(back_populates="images", lazy="raise")
 
 
 class LostItem(_IdentityMixin, Base):
