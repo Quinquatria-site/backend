@@ -69,6 +69,7 @@ def test_successful_issue_returns_the_spec_shape(upload_client: TestClient) -> N
         ("MENU_IMAGE", "images/menu/"),
         ("PERFORMANCE_IMAGE", "images/performance/"),
         ("LOST_ITEM_IMAGE", "images/lost-item/"),
+        ("NOTICE_IMAGE", "images/notice/"),
     ],
 )
 def test_each_resource_type_maps_to_its_prefix(

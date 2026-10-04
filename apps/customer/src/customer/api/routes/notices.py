@@ -4,7 +4,8 @@ from http import HTTPStatus
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Response
-from sqlalchemy import Select, and_, select
+from sqlalchemy import Select, and_, func, select
+from sqlalchemy.dialects.postgresql import aggregate_order_by
 
 from common.errors import ApiError, ErrorCode, ErrorResponse
 from common.pagination import Page
@@ -13,7 +14,13 @@ from common.types import ResourceId
 from customer.api.dependencies import ReadSession
 from customer.api.queries import is_storable_id, paginate
 from customer.api.schemas.notices import NoticeResponse
-from quinquatria_persistence import Notice, NoticeTranslation, NoticeType
+from quinquatria_persistence import (
+    Image,
+    Notice,
+    NoticeImage,
+    NoticeTranslation,
+    NoticeType,
+)
 
 router = APIRouter(
     prefix="/notices",
@@ -23,14 +30,27 @@ router = APIRouter(
 
 
 def _select_notices() -> Select:
+    # 이미지가 없는 공지는 집계 행이 없어 외부 조인 결과가 NULL이 된다.
+    images = (
+        select(
+            NoticeImage.notice_id,
+            func.array_agg(aggregate_order_by(Image.s3_key, NoticeImage.seq)).label(
+                "notice_image_uri"
+            ),
+        )
+        .join(Image, Image.id == NoticeImage.image_id)
+        .group_by(NoticeImage.notice_id)
+        .subquery("notice_images")
+    )
     return select(
         Notice.id,
         Notice.type,
         Notice.created_at,
+        images.c.notice_image_uri,
         NoticeTranslation.language_code,
         NoticeTranslation.title,
         NoticeTranslation.content,
-    )
+    ).select_from(Notice.__table__.outerjoin(images, images.c.notice_id == Notice.id))
 
 
 def _translated_notices(notice_type: NoticeType, query: LanguageQuery) -> Select:

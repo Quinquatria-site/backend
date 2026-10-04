@@ -14,6 +14,7 @@ PREFIXES: dict[ImageResourceType, str] = {
     ImageResourceType.MENU_IMAGE: "images/menu/",
     ImageResourceType.PERFORMANCE_IMAGE: "images/performance/",
     ImageResourceType.LOST_ITEM_IMAGE: "images/lost-item/",
+    ImageResourceType.NOTICE_IMAGE: "images/notice/",
 }
 """명세 §4.5의 resource_type과 prefix 매핑. IAM 최소 권한이 이 경계를 쓴다."""
 

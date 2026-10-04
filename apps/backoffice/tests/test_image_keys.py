@@ -25,6 +25,7 @@ from quinquatria_persistence.enums import ImageContentType, ImageResourceType
         (ImageResourceType.MENU_IMAGE, "images/menu/"),
         (ImageResourceType.PERFORMANCE_IMAGE, "images/performance/"),
         (ImageResourceType.LOST_ITEM_IMAGE, "images/lost-item/"),
+        (ImageResourceType.NOTICE_IMAGE, "images/notice/"),
     ],
 )
 def test_prefixes_follow_the_spec(

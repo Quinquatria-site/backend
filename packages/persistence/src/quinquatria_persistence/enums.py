@@ -36,6 +36,8 @@ class ImageResourceType(StrEnum):
     MENU_IMAGE = "MENU_IMAGE"
     PERFORMANCE_IMAGE = "PERFORMANCE_IMAGE"
     LOST_ITEM_IMAGE = "LOST_ITEM_IMAGE"
+    # ALTER TYPE ADD VALUE가 끝에 붙이므로 DB 순서와 맞춰 마지막에 둔다.
+    NOTICE_IMAGE = "NOTICE_IMAGE"
 
 
 class ImageContentType(StrEnum):
