@@ -85,6 +85,9 @@ Customer API와 Backoffice API는 별도 FastAPI 애플리케이션으로 배포
   처리한다.
 - `place_image_uri`와 `notice_image_uri` 배열의 순서는 화면 노출 순서이며
   API가 보존한다. 이미지가 없으면 빈 배열이 아니라 `null`이다.
+- 공지 이미지(`notice_image_uri`)는 글자가 든 카드뉴스처럼 언어마다 다를 수
+  있으므로 번역(언어)마다 따로 둔다(5.7). 다른 리소스의 이미지는 언어와
+  무관하다.
 - 번역의 `description`과 `found_location`, 장소 번역의 `name`과
   `host_college`는 선택이며 생략하면 빈 문자열로 저장한다. 응답에는 항상
   문자열로 포함하며 `null`이 아니다. 나머지 번역 필드는 필수다.
@@ -478,18 +481,25 @@ API가 시각으로 계산하지 않고 운영자가 Backoffice API로 갱신한
 
 공지 응답 필드는 다음과 같다.
 
-| 필드               | 타입             | 설명                                                                 |
-| ------------------ | ---------------- | -------------------------------------------------------------------- |
-| `id`               | integer          | 공지 ID                                                              |
-| `type`             | string enum      | `PERMANENT` 또는 `GENERAL`                                           |
-| `created_at`       | datetime string  | 서버가 기록한 생성 시각                                              |
-| `notice_image_uri` | string[] \| null | `NOTICE_IMAGE` 업로드로 받은 object key 목록, 이미지가 없으면 `null` |
-| `language_code`    | string enum      | 반환된 번역 언어                                                     |
-| `title`            | string           | 공지 제목                                                            |
-| `content`          | string           | 공지 본문                                                            |
+| 필드               | 타입             | 설명                                                                              |
+| ------------------ | ---------------- | --------------------------------------------------------------------------------- |
+| `id`               | integer          | 공지 ID                                                                           |
+| `type`             | string enum      | `PERMANENT` 또는 `GENERAL`                                                        |
+| `created_at`       | datetime string  | 서버가 기록한 생성 시각                                                           |
+| `notice_image_uri` | string[] \| null | 요청 언어의 `NOTICE_IMAGE` object key 목록. 없으면 KO 이미지, 둘 다 없으면 `null` |
+| `language_code`    | string enum      | 반환된 번역 언어                                                                  |
+| `title`            | string           | 공지 제목                                                                         |
+| `content`          | string           | 공지 본문                                                                         |
 
-목록, 최근 공지, 상세 응답 모두 같은 필드를 가진다. 이미지는 번역과
-무관하므로 요청 언어와 상관없이 같은 배열을 반환한다.
+목록, 최근 공지, 상세 응답 모두 같은 필드를 가진다. 이미지는 언어별로
+등록된다(5.7).
+
+- 요청 언어에 등록된 이미지가 있으면 그 배열을 반환한다.
+- 요청 언어에 이미지가 없으면 KO 이미지 배열로 대체한다. 다른 언어
+  이미지를 아직 만들지 못한 공지도 이미지 없이 보이지 않게 하기 위해서다.
+- KO에도 이미지가 없으면 `null`이다.
+- 대체는 이미지에만 적용한다. 제목·본문은 2.4대로 요청 언어 번역만
+  쓴다.
 
 일반 공지 목록 응답 예시:
 
@@ -735,14 +745,14 @@ presigned PUT URL과 object key를 반환한다. 이미지 binary는 FastAPI를
 
 `resource_type`과 object key prefix의 매핑은 다음과 같다.
 
-| resource_type       | 사용할 리소스 필드           | object key prefix     |
-| ------------------- | ---------------------------- | --------------------- |
-| `CATEGORY_ICON`     | `CATEGORY.category_icon_uri` | `images/category/`    |
-| `PLACE_IMAGE`       | `PLACE.place_image_uri[]`    | `images/place/`       |
-| `MENU_IMAGE`        | `MENU.image_url`             | `images/menu/`        |
-| `PERFORMANCE_IMAGE` | `PERFORMANCE.image_uri`      | `images/performance/` |
-| `NOTICE_IMAGE`      | `NOTICE.notice_image_uri[]`  | `images/notice/`      |
-| `LOST_ITEM_IMAGE`   | `LOST_ITEM.image_url`        | `images/lost-item/`   |
+| resource_type       | 사용할 리소스 필드                      | object key prefix     |
+| ------------------- | --------------------------------------- | --------------------- |
+| `CATEGORY_ICON`     | `CATEGORY.category_icon_uri`            | `images/category/`    |
+| `PLACE_IMAGE`       | `PLACE.place_image_uri[]`               | `images/place/`       |
+| `MENU_IMAGE`        | `MENU.image_url`                        | `images/menu/`        |
+| `PERFORMANCE_IMAGE` | `PERFORMANCE.image_uri`                 | `images/performance/` |
+| `NOTICE_IMAGE`      | `NOTICE_TRANSLATION.notice_image_uri[]` | `images/notice/`      |
+| `LOST_ITEM_IMAGE`   | `LOST_ITEM.image_url`                   | `images/lost-item/`   |
 
 URL 발급 제한:
 
@@ -828,7 +838,8 @@ bucket CORS에는 허용 origin, `PUT`, `Content-Type`,
 5. 검증과 DB transaction이 성공하면 저장된 object key를 포함한
    기본 리소스를 반환한다.
 
-`PLACE.place_image_uri`와 `NOTICE.notice_image_uri`는 이미지 배열이다.
+`PLACE.place_image_uri`와 `NOTICE_TRANSLATION.notice_image_uri`(공지
+언어별)는 이미지 배열이다.
 이미지가 여러 개면 파일마다 업로드 API를 호출하고 반환된 key들을 노출
 순서대로 배열에 넣는다. 배열을 보낼 때는 서로 다른 key를 1개 이상
 포함해야 한다. 이미지가 없는 리소스는 빈 배열이 아니라 `null`로 표현한다.
@@ -842,7 +853,8 @@ object key는 참조가 제거된 객체로 보고 아래 수명 주기 규칙�
 
 - 다른 리소스에 이미 연결된 key는 `409 IMAGE_ALREADY_ATTACHED`다.
 - 같은 `place_image_uri` 또는 `notice_image_uri` 배열에 key가 중복되면
-  `422 INVALID_IMAGE`다.
+  `422 INVALID_IMAGE`다. 한 공지 요청 안에서 같은 key를 두 언어에 보내는
+  것도 `422 INVALID_IMAGE`다. 같은 그림이라도 언어마다 따로 업로드한다.
 - field와 key prefix가 맞지 않거나 객체가 없으면
   `422 INVALID_IMAGE`다.
 - 실제 크기가 10 MiB를 초과하거나 발급 요청의 Content-Type과 이미지
@@ -1463,13 +1475,27 @@ PATCH /api/v1/places/10
 
 기본 리소스:
 
-| 필드               | 타입                | POST          | PATCH               | 설명                                       |
-| ------------------ | ------------------- | ------------- | ------------------- | ------------------------------------------ |
-| `id`               | integer             | 서버 생성     | 수정 불가           | 공지 ID                                    |
-| `type`             | string enum         | 필수          | 선택                | `PERMANENT` 또는 `GENERAL`                 |
-| `created_at`       | datetime string     | 서버 생성     | 수정 불가           | 생성 시각                                  |
-| `notice_image_uri` | string[] \| null    | 선택          | 선택                | 순서가 보존되는 이미지 목록, 기본값 `null` |
-| `translations`     | NoticeTranslation[] | 필수, KO 포함 | 선택, 언어별 upsert | 전체 번역                                  |
+| 필드           | 타입                | POST          | PATCH               | 설명                       |
+| -------------- | ------------------- | ------------- | ------------------- | -------------------------- |
+| `id`           | integer             | 서버 생성     | 수정 불가           | 공지 ID                    |
+| `type`         | string enum         | 필수          | 선택                | `PERMANENT` 또는 `GENERAL` |
+| `created_at`   | datetime string     | 서버 생성     | 수정 불가           | 생성 시각                  |
+| `translations` | NoticeTranslation[] | 필수, KO 포함 | 선택, 언어별 upsert | 전체 번역과 언어별 이미지  |
+
+공지 단위 `notice_image_uri`는 없다. 이미지는 `NoticeTranslation`마다
+둔다. 기본 리소스에 `notice_image_uri`를 보내면 명세에 없는 필드이므로
+`422 VALIDATION_ERROR`다.
+
+`NoticeTranslation`:
+
+| 필드               | 타입             | 요청        | 응답 | 설명                                                   |
+| ------------------ | ---------------- | ----------- | ---- | ------------------------------------------------------ |
+| `id`               | integer          | 보내지 않음 | 포함 | 번역 ID                                                |
+| `notice_id`        | integer          | 보내지 않음 | 포함 | 공지 ID                                                |
+| `language_code`    | string enum      | 필수        | 포함 | 번역 언어                                              |
+| `title`            | string           | 필수        | 포함 | 공지 제목                                              |
+| `content`          | string           | 필수        | 포함 | 공지 본문                                              |
+| `notice_image_uri` | string[] \| null | 선택        | 포함 | 이 언어로 보여줄 이미지 목록(순서 보존), 기본값 `null` |
 
 `notice_image_uri`는 `place_image_uri`(5.4)와 같은 규칙을 따른다. 이미지가
 없음을 `null`로 표현하며, 배열을 보낼 때 다음을 위반하면
@@ -1479,38 +1505,41 @@ PATCH /api/v1/places/10
 - 배열 원소는 `null`일 수 없다.
 - 중첩 배열은 허용하지 않는다. 1차원 문자열 배열만 받는다.
 
-key 검증과 연결·해제는 4.6을 따른다. `PATCH`에 `null`을 보내면 모든
-이미지 연결을 해제하고, 생략하면 저장된 배열을 유지한다.
+key 검증과 연결·해제는 4.6을 따른다. 언어별 규칙은 다음과 같다.
 
-`NoticeTranslation`:
-
-| 필드            | 타입        | 요청        | 응답 | 설명      |
-| --------------- | ----------- | ----------- | ---- | --------- |
-| `id`            | integer     | 보내지 않음 | 포함 | 번역 ID   |
-| `notice_id`     | integer     | 보내지 않음 | 포함 | 공지 ID   |
-| `language_code` | string enum | 필수        | 포함 | 번역 언어 |
-| `title`         | string      | 필수        | 포함 | 공지 제목 |
-| `content`       | string      | 필수        | 포함 | 공지 본문 |
+- `POST`에서 번역의 `notice_image_uri`를 생략하거나 `null`로 보내면 그
+  언어에는 이미지가 없다.
+- `PATCH`의 번역 항목에서 `notice_image_uri`를 생략하면 그 언어의 저장된
+  배열을 유지한다. 제목만 고쳐도 이미지가 지워지지 않는다. `null`을 보내면
+  그 언어의 이미지 연결을 모두 해제하고, 배열을 보내면 그 언어의 배열 전체를
+  바꾼다. 요청에 없는 언어의 이미지는 바뀌지 않는다.
+- 한 key는 한 언어의 배열에만 둘 수 있다. 다른 언어에 이미 연결된 key를
+  보내면 `409 IMAGE_ALREADY_ATTACHED`다. 언어 사이로 이미지를 옮기려면 새로
+  업로드한다.
+- 번역을 `DELETE`하면 그 언어의 이미지 연결도 해제되어 `DETACHED`가 된다.
 
 생성 요청 예시:
 
 ```json
 {
     "type": "PERMANENT",
-    "notice_image_uri": [
-        "images/notice/550e8400-e29b-41d4-a716-446655440006.webp",
-        "images/notice/550e8400-e29b-41d4-a716-446655440007.webp"
-    ],
     "translations": [
         {
             "language_code": "KO",
             "title": "안전 수칙",
-            "content": "안전요원의 안내를 따라 주세요."
+            "content": "안전요원의 안내를 따라 주세요.",
+            "notice_image_uri": [
+                "images/notice/550e8400-e29b-41d4-a716-446655440006.webp",
+                "images/notice/550e8400-e29b-41d4-a716-446655440007.webp"
+            ]
         },
         {
             "language_code": "EN",
             "title": "Safety Guidelines",
-            "content": "Please follow the safety staff's instructions."
+            "content": "Please follow the safety staff's instructions.",
+            "notice_image_uri": [
+                "images/notice/550e8400-e29b-41d4-a716-446655440008.webp"
+            ]
         },
         {
             "language_code": "CHN",
@@ -1528,31 +1557,35 @@ key 검증과 연결·해제는 4.6을 따른다. `PATCH`에 `null`을 보내면
     "id": 42,
     "type": "PERMANENT",
     "created_at": "2026-10-05T13:00:00+09:00",
-    "notice_image_uri": [
-        "images/notice/550e8400-e29b-41d4-a716-446655440006.webp",
-        "images/notice/550e8400-e29b-41d4-a716-446655440007.webp"
-    ],
     "translations": [
         {
             "id": 201,
             "notice_id": 42,
             "language_code": "CHN",
             "title": "安全须知",
-            "content": "请遵循安全人员的指引。"
+            "content": "请遵循安全人员的指引。",
+            "notice_image_uri": null
         },
         {
             "id": 202,
             "notice_id": 42,
             "language_code": "EN",
             "title": "Safety Guidelines",
-            "content": "Please follow the safety staff's instructions."
+            "content": "Please follow the safety staff's instructions.",
+            "notice_image_uri": [
+                "images/notice/550e8400-e29b-41d4-a716-446655440008.webp"
+            ]
         },
         {
             "id": 203,
             "notice_id": 42,
             "language_code": "KO",
             "title": "안전 수칙",
-            "content": "안전요원의 안내를 따라 주세요."
+            "content": "안전요원의 안내를 따라 주세요.",
+            "notice_image_uri": [
+                "images/notice/550e8400-e29b-41d4-a716-446655440006.webp",
+                "images/notice/550e8400-e29b-41d4-a716-446655440007.webp"
+            ]
         }
     ]
 }
@@ -1585,14 +1618,14 @@ key 검증과 연결·해제는 4.6을 따른다. `PATCH`에 `null`을 보내면
 
 모든 삭제는 soft delete가 아닌 영구 삭제다.
 
-| 삭제 대상   | 동작                                                                                                                                                            |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Category    | 고정 목록이므로 API로 삭제하지 않는다(5.1). 번역 `DELETE`만 제공한다.                                                                                           |
-| Place       | PlaceTranslation, 하위 Menu, 각 MenuTranslation을 모두 연쇄 삭제한다.                                                                                           |
-| Menu        | MenuTranslation을 연쇄 삭제한다.                                                                                                                                |
-| Performance | PerformanceTranslation을 연쇄 삭제한다. `is_live=true`였다면 live 공연이 없는 상태가 된다. 같은 일차의 남은 공연은 `seq`가 `1`부터 연속이 되도록 다시 매겨진다. |
-| Notice      | NoticeTranslation과 이미지 연결을 연쇄 삭제한다. 연결됐던 이미지는 `DETACHED`가 되어 cleanup 대상이 된다.                                                       |
-| LostItem    | LostItemTranslation을 연쇄 삭제한다.                                                                                                                            |
+| 삭제 대상   | 동작                                                                                                                                                                        |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Category    | 고정 목록이므로 API로 삭제하지 않는다(5.1). 번역 `DELETE`만 제공한다.                                                                                                       |
+| Place       | PlaceTranslation, 하위 Menu, 각 MenuTranslation을 모두 연쇄 삭제한다.                                                                                                       |
+| Menu        | MenuTranslation을 연쇄 삭제한다.                                                                                                                                            |
+| Performance | PerformanceTranslation을 연쇄 삭제한다. `is_live=true`였다면 live 공연이 없는 상태가 된다. 같은 일차의 남은 공연은 `seq`가 `1`부터 연속이 되도록 다시 매겨진다.             |
+| Notice      | NoticeTranslation과 언어별 이미지 연결을 연쇄 삭제한다. 연결됐던 이미지는 `DETACHED`가 되어 cleanup 대상이 된다. 번역 하나만 삭제해도 그 언어의 이미지가 `DETACHED`가 된다. |
+| LostItem    | LostItemTranslation을 연쇄 삭제한다.                                                                                                                                        |
 
 존재하지 않는 ID의 삭제는 `404 RESOURCE_NOT_FOUND`다. 성공한 삭제는 빈
 본문의 `204 No Content`를 반환한다.
@@ -1696,7 +1729,11 @@ Bearer 인증이 필요하다.
 `LOST_ITEM.image_url`은 `IMAGE`를 참조하는 nullable FK가 되고,
 `PLACE.place_image_uri`와 `NOTICE.notice_image_uri`는 각각 순서를 갖는
 `PLACE_IMAGE`, `NOTICE_IMAGE` 연결 엔티티로 대체된다. 두 연결 엔티티는
-`image_id`에 unique, `(부모 ID, seq)`에 deferrable unique 제약을 둔다. API 요청과 응답은 이 변경과 무관하게 object key 문자열을
+`image_id`에 unique, `(부모 ID, seq)`에 deferrable unique 제약을 둔다.
+`NOTICE_IMAGE`는 언어별로 `language_code`를 갖고 순서 unique가
+`(notice_id, language_code, seq)`다. `(notice_id, language_code)`는
+`NOTICE_TRANSLATION`을 참조하는 FK여서, 번역이 없는 언어에는 이미지를 둘
+수 없고 번역을 지우면 그 언어의 연결도 지워진다. API 요청과 응답은 이 변경과 무관하게 object key 문자열을
 주고받으며 `image_id`를 노출하지 않는다.
 
 `PERFORMANCE`의 `start_at`과 `end_at`은 ERD에서 제거하고 `date`, `seq`,
@@ -1831,12 +1868,12 @@ migration이 입력하며, 배포 시 migration 단계에서 함께 반영된다
 45. 카테고리가 없는 장소는 여러 개 있어도 구역 번호 중복으로 보지 않는다.
 46. migration 직후 Category는 5.3 표의 9개 행과 각 KO·EN·CHN 번역을
     가지며, `PATCH`로 `code`를 보내면 `422 VALIDATION_ERROR`다.
-47. 공지 `POST`·`PATCH`에 보낸 `notice_image_uri` 순서가 Backoffice와
-    Customer 응답(목록, 최근 공지, 상세)에 그대로 유지되고, 이미지가 없는
-    공지는 `null`이다.
-48. 공지 `PATCH`로 `notice_image_uri` 배열을 바꾸면 새 배열에서 빠진
-    이미지만 `DETACHED`가 되고, 공지를 삭제하면 연결됐던 이미지가 모두
-    `DETACHED`가 된다.
+47. 공지 번역마다 보낸 `notice_image_uri` 순서가 Backoffice 응답의 각 번역과
+    Customer 응답(목록, 최근 공지, 상세)에 그대로 유지된다. Customer는 요청
+    언어에 이미지가 없으면 KO 이미지를, 둘 다 없으면 `null`을 반환한다.
+48. 공지 `PATCH`로 한 언어의 `notice_image_uri`를 바꾸면 그 언어에서 빠진
+    이미지만 `DETACHED`가 되고 다른 언어 이미지는 그대로다. 번역을 삭제하면 그
+    언어의 이미지가, 공지를 삭제하면 모든 언어의 이미지가 `DETACHED`가 된다.
 49. `notice_image_uri`에 `images/notice/`가 아닌 prefix의 key를 보내면
     `422 INVALID_IMAGE`다.
 50. `is_polygon: true`와 꼭짓점 3개 이상의 `area`로 Place를 `POST`하면

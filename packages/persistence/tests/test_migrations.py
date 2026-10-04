@@ -42,7 +42,7 @@ EXPECTED_INDEXES = {
     "menu": {("place_id", "id")},
     "performance": {("date", "seq", "id"), ("type", "date", "seq", "id")},
     "notice": {("created_at", "id"), ("type", "created_at", "id")},
-    "notice_image": {("notice_id", "seq")},
+    "notice_image": {("notice_id", "language_code", "seq")},
     "lost_item": {("created_at", "id"), ("is_returned", "created_at", "id")},
     "image": {("status", "created_at"), ("status", "detached_at")},
 }
@@ -381,7 +381,7 @@ def test_downgrade_refuses_while_a_place_uses_an_added_category(
     migration_engine, alembic_config, category_id, code
 ):
     """장소를 어느 카테고리로 옮길지 추측하지 않는다."""
-    command.upgrade(alembic_config, "head")
+    command.upgrade(alembic_config, "0009_category_additions")
     with migration_engine.begin() as connection:
         connection.execute(
             text(
@@ -398,4 +398,93 @@ def test_downgrade_refuses_while_a_place_uses_an_added_category(
         assert (
             connection.scalar(text("SELECT version_num FROM alembic_version"))
             == "0009_category_additions"
+        )
+
+
+def test_upgrade_moves_existing_notice_images_to_ko(migration_engine, alembic_config):
+    command.upgrade(alembic_config, "0009_category_additions")
+    with migration_engine.begin() as connection:
+        connection.execute(text("INSERT INTO notice (type) VALUES ('GENERAL')"))
+        connection.execute(
+            text(
+                "INSERT INTO notice_translation (notice_id, language_code, title, "
+                "content) VALUES (1, 'KO', '공지', '본문')"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO image (s3_key, resource_type, content_type, "
+                "declared_size, status) VALUES ('images/notice/a.webp', "
+                "'NOTICE_IMAGE', 'image/webp', 1, 'ATTACHED')"
+            )
+        )
+        connection.execute(
+            text("INSERT INTO notice_image (notice_id, image_id, seq) VALUES (1, 1, 1)")
+        )
+
+    command.upgrade(alembic_config, "head")
+
+    with migration_engine.connect() as connection:
+        assert (
+            connection.scalar(text("SELECT language_code::text FROM notice_image"))
+            == "KO"
+        )
+
+
+def test_upgrade_refuses_notice_images_without_ko_translation(
+    migration_engine, alembic_config
+):
+    """어느 언어 이미지인지 추측하지 않는다."""
+    command.upgrade(alembic_config, "0009_category_additions")
+    with migration_engine.begin() as connection:
+        connection.execute(text("INSERT INTO notice (type) VALUES ('GENERAL')"))
+        connection.execute(
+            text(
+                "INSERT INTO image (s3_key, resource_type, content_type, "
+                "declared_size, status) VALUES ('images/notice/a.webp', "
+                "'NOTICE_IMAGE', 'image/webp', 1, 'ATTACHED')"
+            )
+        )
+        connection.execute(
+            text("INSERT INTO notice_image (notice_id, image_id, seq) VALUES (1, 1, 1)")
+        )
+
+    with pytest.raises(Exception, match="KO translation"):
+        command.upgrade(alembic_config, "head")
+
+
+def test_downgrade_refuses_while_notices_have_non_ko_images(
+    migration_engine, alembic_config
+):
+    """이전 구조는 언어를 구분하지 못해 다른 언어 이미지를 옮길 곳이 없다."""
+    command.upgrade(alembic_config, "head")
+    with migration_engine.begin() as connection:
+        connection.execute(text("INSERT INTO notice (type) VALUES ('GENERAL')"))
+        connection.execute(
+            text(
+                "INSERT INTO notice_translation (notice_id, language_code, title, "
+                "content) VALUES (1, 'EN', 'Notice', 'Body')"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO image (s3_key, resource_type, content_type, "
+                "declared_size, status) VALUES ('images/notice/a.webp', "
+                "'NOTICE_IMAGE', 'image/webp', 1, 'ATTACHED')"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO notice_image (notice_id, language_code, image_id, seq) "
+                "VALUES (1, 'EN', 1, 1)"
+            )
+        )
+
+    with pytest.raises(Exception, match="other than KO"):
+        command.downgrade(alembic_config, "0009_category_additions")
+
+    with migration_engine.connect() as connection:
+        assert (
+            connection.scalar(text("SELECT version_num FROM alembic_version"))
+            == "0010_notice_image_language"
         )

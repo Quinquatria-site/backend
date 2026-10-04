@@ -16,6 +16,7 @@ from customer.api.queries import is_storable_id, paginate
 from customer.api.schemas.notices import NoticeResponse
 from quinquatria_persistence import (
     Image,
+    LanguageCode,
     Notice,
     NoticeImage,
     NoticeTranslation,
@@ -29,33 +30,56 @@ router = APIRouter(
 )
 
 
-def _select_notices() -> Select:
-    # 이미지가 없는 공지는 집계 행이 없어 외부 조인 결과가 NULL이 된다.
+def _select_notices(language_code: str) -> Select:
+    """요청 언어 이미지를 쓰고, 그 언어에 이미지가 없으면 KO 이미지로 대체한다.
+
+    이미지는 언어별이다(명세 §3.5). 아직 다른 언어 이미지를 만들지 못한 공지도
+    빈 화면이 되지 않게 KO로 대체한다. 어느 쪽도 없으면 집계 행이 없어 NULL이다.
+    """
     images = (
         select(
             NoticeImage.notice_id,
+            NoticeImage.language_code,
             func.array_agg(aggregate_order_by(Image.s3_key, NoticeImage.seq)).label(
-                "notice_image_uri"
+                "image_keys"
             ),
         )
         .join(Image, Image.id == NoticeImage.image_id)
-        .group_by(NoticeImage.notice_id)
+        .group_by(NoticeImage.notice_id, NoticeImage.language_code)
         .subquery("notice_images")
     )
+    requested = images.alias("requested_images")
+    fallback = images.alias("ko_images")
     return select(
         Notice.id,
         Notice.type,
         Notice.created_at,
-        images.c.notice_image_uri,
+        func.coalesce(requested.c.image_keys, fallback.c.image_keys).label(
+            "notice_image_uri"
+        ),
         NoticeTranslation.language_code,
         NoticeTranslation.title,
         NoticeTranslation.content,
-    ).select_from(Notice.__table__.outerjoin(images, images.c.notice_id == Notice.id))
+    ).select_from(
+        Notice.__table__.outerjoin(
+            requested,
+            and_(
+                requested.c.notice_id == Notice.id,
+                requested.c.language_code == language_code,
+            ),
+        ).outerjoin(
+            fallback,
+            and_(
+                fallback.c.notice_id == Notice.id,
+                fallback.c.language_code == LanguageCode.KO.value,
+            ),
+        )
+    )
 
 
 def _translated_notices(notice_type: NoticeType, query: LanguageQuery) -> Select:
     return (
-        _select_notices()
+        _select_notices(query.language_code.value)
         .join(NoticeTranslation, NoticeTranslation.notice_id == Notice.id)
         .where(
             Notice.type == notice_type,
@@ -93,7 +117,7 @@ async def get_latest_general_notice(
     query: Annotated[LanguageQuery, Query()], session: ReadSession
 ) -> NoticeResponse | Response:
     result = await session.execute(
-        _select_notices()
+        _select_notices(query.language_code.value)
         .outerjoin(
             NoticeTranslation,
             and_(
@@ -123,7 +147,7 @@ async def get_notice(
         raise ApiError(ErrorCode.RESOURCE_NOT_FOUND)
 
     result = await session.execute(
-        _select_notices()
+        _select_notices(query.language_code.value)
         .outerjoin(
             NoticeTranslation,
             and_(
