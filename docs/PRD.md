@@ -148,10 +148,13 @@ erDiagram
   PLACE ||--o{ PLACE_IMAGE : has
   IMAGE ||--o| PLACE_IMAGE : referenced_by
 
+  NOTICE ||--o{ NOTICE_IMAGE : has
+  IMAGE ||--o| NOTICE_IMAGE : referenced_by
+
   IMAGE {
     int id PK
     string s3_key "S3 key, UNIQUE"
-    string resource_type "CATEGORY_ICON/PLACE_IMAGE/MENU_IMAGE/PERFORMANCE_IMAGE/LOST_ITEM_IMAGE"
+    string resource_type "CATEGORY_ICON/PLACE_IMAGE/MENU_IMAGE/PERFORMANCE_IMAGE/NOTICE_IMAGE/LOST_ITEM_IMAGE"
     string content_type "image/jpeg, image/png, image/webp"
     string status "UPLOADING/UPLOADED/ATTACHED/DETACHED"
     datetime detached_at "연결 해제 시각, cleanup 유예 기준"
@@ -160,6 +163,13 @@ erDiagram
   PLACE_IMAGE {
     int id PK
     int place_id FK
+    int image_id FK "UNIQUE"
+    int seq "노출 순서"
+  }
+
+  NOTICE_IMAGE {
+    int id PK
+    int notice_id FK
     int image_id FK "UNIQUE"
     int seq "노출 순서"
   }
