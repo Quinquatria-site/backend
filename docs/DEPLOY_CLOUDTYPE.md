@@ -1,8 +1,7 @@
 # Cloudtype 임시 배포
 
-프론트가 develop 브랜치의 구현을 바로 연결해 볼 수 있도록 Cloudtype에 띄우는
-**임시** 배포 절차입니다. 정식 운영 배포가 아니며, 아래 "임시 배포 한정 예외"는
-정식 배포에 가져가지 않습니다.
+EC2 운영 배포를 내린 동안 `main` 브랜치를 Cloudtype에 띄우는 **임시** 배포
+절차입니다. 아래 "임시 배포 한정 예외"는 정식 배포에 가져가지 않습니다.
 
 ## 구성
 
@@ -11,11 +10,15 @@
 | 서비스 | 템플릿 | 소스 |
 | --- | --- | --- |
 | `postgresql` | PostgreSQL | - |
-| `customer` | Dockerfile | GitHub 저장소 `develop` 브랜치, `Dockerfile.customer` |
-| `backoffice` | Dockerfile | GitHub 저장소 `develop` 브랜치, `Dockerfile.backoffice` |
+| `customer` | Dockerfile | GitHub 저장소 `main` 브랜치, `Dockerfile.customer` |
+| `backoffice` | Dockerfile | GitHub 저장소 `main` 브랜치, `Dockerfile.backoffice` |
 
 - 두 앱 모두 빌드 컨텍스트는 저장소 루트이고 컨테이너 포트는 `8000`입니다.
-- develop에 push되면 두 앱이 자동으로 다시 배포되도록 브랜치 자동 배포를 켭니다.
+- `main`에 push(PR merge)되면 두 앱이 자동으로 다시 배포되도록 브랜치 자동
+  배포를 켭니다. 자동 배포는 CI 결과를 기다리지 않으므로 `main` 보호 규칙에서
+  CI 통과를 merge 조건으로 둡니다.
+- 수동 재배포는 Cloudtype 대시보드에서 각 서비스의 배포 버튼으로 `main` 최신
+  커밋을 다시 빌드합니다.
 - `backoffice`는 기동할 때 `alembic upgrade head`를 먼저 실행합니다. 이미 최신이면
   아무것도 하지 않습니다. 두 인스턴스가 동시에 마이그레이션하지 않도록
   **`backoffice` 인스턴스는 1개로 둡니다.**
