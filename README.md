@@ -116,7 +116,7 @@ uv sync --package customer --no-dev --locked
 
 ## 임시 배포
 
-프론트 연동 테스트용으로 develop 브랜치를 Cloudtype에 배포합니다. 앱별
+`main` 브랜치를 Cloudtype에 배포합니다. 앱별
 이미지는 루트의 `Dockerfile.customer`, `Dockerfile.backoffice`로 빌드하며,
 설정 절차와 환경변수는 [Cloudtype 임시 배포](docs/DEPLOY_CLOUDTYPE.md)를
 참고합니다.
