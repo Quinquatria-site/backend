@@ -1,0 +1,62 @@
+name: Image cleanup
+
+# 고아 이미지 회수(`python -m backoffice.images`)를 주기적으로 실행한다.
+# Cloudtype 임시 배포 한정: DB를 외부에 열어야 성립하며, 정식 배포에서는
+# ECS 스케줄 작업으로 교체한다. 자세한 내용은 docs/deploy/s3-image-storage.md §6.
+on:
+    schedule:
+        # 정각은 GitHub 스케줄 부하가 몰려 지연·누락이 잦다. 매시 17분에 돈다.
+        - cron: '17 * * * *'
+    workflow_dispatch:
+
+# 멱등하므로 겹쳐도 안전하지만, 앞선 실행이 끝나기 전에 같은 후보를 다시
+# 잡을 이유가 없다. 진행 중인 실행은 취소하지 않고 다음 실행을 대기시킨다.
+concurrency:
+    group: ${{ github.workflow }}
+    cancel-in-progress: false
+
+permissions:
+    contents: read
+
+env:
+    UV_VERSION: '0.12.11'
+
+jobs:
+    cleanup:
+        name: sweep orphan images
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        # 운영 DB URL은 이 environment의 secret에만 둔다.
+        environment: production
+        permissions:
+            contents: read
+            id-token: write
+        steps:
+            - uses: actions/checkout@v7
+
+            - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+              with:
+                  version: ${{ env.UV_VERSION }}
+                  enable-cache: true
+
+            - name: 의존성 설치
+              run: uv sync --package backoffice --no-dev --locked
+
+            # 정적 키 없이 OIDC로 cleanup 전용 role을 assume한다.
+            - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+              with:
+                  role-to-assume: ${{ vars.AWS_CLEANUP_ROLE_ARN }}
+                  aws-region: ${{ vars.BACKOFFICE_S3_REGION }}
+
+            - name: cleanup 실행
+              env:
+                  DATABASE_URL: ${{ secrets.CLEANUP_DATABASE_URL }}
+                  BACKOFFICE_S3_BUCKET: ${{ vars.BACKOFFICE_S3_BUCKET }}
+                  BACKOFFICE_S3_REGION: ${{ vars.BACKOFFICE_S3_REGION }}
+              # Settings가 요구하는 인증 비밀값은 cleanup이 쓰지 않는다. 운영 값을
+              # 이 job에 퍼뜨리지 않도록 실행마다 버리는 무작위 값을 넣는다.
+              run: |
+                  BACKOFFICE_ISSUANCE_CODE="$(openssl rand -hex 16)"
+                  BACKOFFICE_JWT_SIGNING_KEY="$(openssl rand -hex 32)"
+                  export BACKOFFICE_ISSUANCE_CODE BACKOFFICE_JWT_SIGNING_KEY
+                  uv run --no-sync --package backoffice python -m backoffice.images

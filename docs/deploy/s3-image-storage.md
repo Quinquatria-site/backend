@@ -68,10 +68,63 @@ bucket policy에서도 이 조건이 없는 `PutObject`를 거부해, 서명을 
 `python -m backoffice.images`를 주기적으로 실행한다.
 
 - 권장 주기: 1시간
-- 실행 주체는 배포 환경의 스케줄러다 (EventBridge 규칙, ECS Scheduled
-  Task 등). 애플리케이션 코드에 주기를 넣지 않는다.
+- 실행 주체는 배포 환경의 스케줄러다. 애플리케이션 코드에 주기를 넣지 않는다.
 - 멱등하므로 중복 실행과 중간 실패가 모두 안전하다.
 - API 프로세스와 분리해 실행한다.
+
+### GitHub Actions 스케줄 (Cloudtype 임시 배포 한정)
+
+> **Cloudtype 임시 배포에서만 쓰는 구성이다.** runner가 VPC 밖에서 돌기
+> 때문에 DB를 인터넷에 열어야 성립한다. 정식 배포에서 DB를 프라이빗
+> 서브넷에 두면 runner가 닿지 못하므로, 그때는 이 workflow를 지우고
+> EventBridge Scheduler + ECS Fargate 작업으로 같은 이미지를
+> `python -m backoffice.images` 명령으로 VPC 안에서 실행한다. 자격 증명은
+> task role이 맡고 DB는 외부에 열지 않는다.
+
+현재 실행 주체는 [`image-cleanup.yml`](../../.github/workflows/image-cleanup.yml)이다.
+매시 17분에 돌고, Actions 탭에서 수동으로도 실행할 수 있다. GitHub의
+`schedule`은 기본 브랜치의 workflow만 실행하며 부하에 따라 지연될 수 있다.
+
+전제 조건:
+
+- **DB 접근:** runner가 운영 DB에 닿아야 한다. Cloudtype 내부 호스트는
+  외부에서 닿지 않으므로 PostgreSQL 서비스의 외부 접속을 켜고, 외부 주소로
+  만든 URL을 쓴다. 외부에 여는 만큼 강한 비밀번호를 둔다.
+- **AWS 권한:** 정적 키 없이 GitHub OIDC로 cleanup 전용 role을 assume한다.
+  trust policy의 `sub`는 `repo:Quinquatria-site/backend:environment:production`으로
+  한정한다. 권한은 회수에 필요한 두 가지뿐이다.
+
+  ```json
+  {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Action": "s3:ListBucket",
+        "Resource": "arn:aws:s3:::<bucket>",
+        "Condition": { "StringLike": { "s3:prefix": "images/*" } }
+      },
+      {
+        "Effect": "Allow",
+        "Action": "s3:DeleteObject",
+        "Resource": "arn:aws:s3:::<bucket>/images/*"
+      }
+    ]
+  }
+  ```
+
+- **저장소 설정:** `production` environment에 아래 값을 둔다.
+
+  | 종류     | 이름                    | 값                       |
+  | -------- | ----------------------- | ------------------------ |
+  | Secret   | `CLEANUP_DATABASE_URL`  | 외부 접속용 운영 DB URL  |
+  | Variable | `AWS_CLEANUP_ROLE_ARN`  | 위 role의 ARN            |
+  | Variable | `BACKOFFICE_S3_BUCKET`  | 업로드 버킷 이름         |
+  | Variable | `BACKOFFICE_S3_REGION`  | 버킷 리전                |
+
+`BACKOFFICE_ISSUANCE_CODE`와 `BACKOFFICE_JWT_SIGNING_KEY`는 설정 로딩에만
+필요하고 cleanup은 쓰지 않는다. workflow가 실행마다 무작위 값을 만들어 넣으므로
+운영 값을 등록하지 않는다.
 
 ## 7. 환경변수
 
