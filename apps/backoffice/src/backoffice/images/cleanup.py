@@ -32,6 +32,22 @@ class SweepReport:
     deleted: int
     failed: int
     orphans: int
+    reclaimed_bytes: int
+    """S3에서 실제로 지운 객체의 크기 합. 객체 없이 행만 지운 경우는 0이다."""
+
+
+@dataclass(frozen=True)
+class StorageReport:
+    """이미지 prefix 아래 S3 객체의 현재 용량.
+
+    `trash_*`는 DB가 `ATTACHED`로 참조하지 않는 객체다. 유예가 지나면
+    cleanup이 회수하므로, 이 값의 추이가 불용 데이터가 쌓이고 줄어드는 모습이다.
+    """
+
+    stored_objects: int
+    stored_bytes: int
+    trash_objects: int
+    trash_bytes: int
 
 
 def _reclaimable(cutoff: datetime) -> ColumnElement[bool]:
@@ -78,6 +94,7 @@ async def sweep(
 
     deleted = 0
     failed = 0
+    reclaimed_bytes = 0
     for image_id in candidates:
         async with database.transaction() as session:
             # 확인과 선점이 한 문장이라 그 사이에 attach가 끼어들 틈이 없다.
@@ -91,6 +108,8 @@ async def sweep(
             # 후보를 읽은 뒤 이 이미지가 연결됐다. 객체를 건드리지 않는다.
             continue
         try:
+            # 삭제 응답에는 크기가 없어 먼저 읽는다. 객체가 없으면 행만 회수한다.
+            head = await store.head(key)
             await store.delete(key)
         except Exception:
             # 행은 이미 없다. 남은 객체는 `_sweep_untracked`가 회수한다.
@@ -98,30 +117,37 @@ async def sweep(
             logger.warning("이미지 삭제 실패, 다음 실행에서 회수: key=%s", key)
             continue
         deleted += 1
+        reclaimed_bytes += 0 if head is None else head.content_length
 
     async with database.session() as session:
-        orphans = await _sweep_untracked(
+        orphans, orphan_bytes = await _sweep_untracked(
             session, store, cutoff=cutoff, budget=batch_size - deleted - failed
         )
-    return SweepReport(deleted=deleted, failed=failed, orphans=orphans)
+    return SweepReport(
+        deleted=deleted,
+        failed=failed,
+        orphans=orphans,
+        reclaimed_bytes=reclaimed_bytes + orphan_bytes,
+    )
 
 
 async def _sweep_untracked(
     session, store: ObjectStore, *, cutoff: datetime, budget: int
-) -> int:
+) -> tuple[int, int]:
     """행이 아예 없는 객체를 회수한다.
 
     발급 transaction이 rollback됐는데 client가 이미 S3 PUT을 성공시킨 경우다.
-    DB만 보는 sweep으로는 영영 찾지 못한다.
+    DB만 보는 sweep으로는 영영 찾지 못한다. 회수한 개수와 바이트를 돌려준다.
     """
     if budget <= 0:
-        return 0
+        return 0, 0
 
     removed = 0
+    removed_bytes = 0
     for prefix in PREFIXES.values():
         async for summary in store.list_prefix(prefix):
             if removed >= budget:
-                return removed
+                return removed, removed_bytes
             if summary.last_modified >= cutoff:
                 continue
             tracked = await session.scalar(
@@ -135,4 +161,37 @@ async def _sweep_untracked(
                 logger.warning("고아 객체 삭제 실패: key=%s", summary.key)
                 continue
             removed += 1
-    return removed
+            removed_bytes += summary.size
+    return removed, removed_bytes
+
+
+async def measure(database: Database, store: ObjectStore) -> StorageReport:
+    """이미지 prefix 아래 S3 객체를 DB의 참조 상태와 대조해 용량을 잰다.
+
+    S3 기본 용량 지표는 하루 한 번이라, cleanup 실행마다 직접 집계한다.
+    """
+    async with database.session() as session:
+        attached = set(
+            (
+                await session.execute(
+                    select(Image.s3_key).where(Image.status == ImageStatus.ATTACHED)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    stored_objects = stored_bytes = trash_objects = trash_bytes = 0
+    for prefix in PREFIXES.values():
+        async for summary in store.list_prefix(prefix):
+            stored_objects += 1
+            stored_bytes += summary.size
+            if summary.key not in attached:
+                trash_objects += 1
+                trash_bytes += summary.size
+    return StorageReport(
+        stored_objects=stored_objects,
+        stored_bytes=stored_bytes,
+        trash_objects=trash_objects,
+        trash_bytes=trash_bytes,
+    )

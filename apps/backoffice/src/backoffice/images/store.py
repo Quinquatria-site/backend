@@ -24,6 +24,7 @@ class ObjectSummary:
 
     key: str
     last_modified: datetime
+    size: int
 
 
 class ObjectStore(Protocol):

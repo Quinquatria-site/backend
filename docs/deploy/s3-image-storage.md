@@ -91,8 +91,10 @@ bucket policy에서도 이 조건이 없는 `PutObject`를 거부해, 서명을 
   외부에서 닿지 않으므로 PostgreSQL 서비스의 외부 접속을 켜고, 외부 주소로
   만든 URL을 쓴다. 외부에 여는 만큼 강한 비밀번호를 둔다.
 - **AWS 권한:** 정적 키 없이 GitHub OIDC로 cleanup 전용 role을 assume한다.
-  trust policy의 `sub`는 `repo:Quinquatria-site/backend:environment:production`으로
-  한정한다. 권한은 회수에 필요한 두 가지뿐이다.
+  저장소가 OIDC immutable subject를 쓰므로 trust policy의 `sub`는
+  `repo:Quinquatria-site@316485687/backend@1362256399:environment:production`으로
+  한정한다. 실제 형식은 `gh api repos/Quinquatria-site/backend/actions/oidc/customization/sub`의
+  `sub_claim_prefix`로 확인한다. 권한은 회수에 필요한 두 가지뿐이다.
 
   ```json
   {
@@ -164,3 +166,39 @@ CHECK를 바꾸는 마이그레이션이 함께 필요하다.
   서명은 올라오지 않는다. SDK 서명 과정을 디버깅하려면 코드에서 이 억제를
   빼야 한다.
 - bucket 이름과 내부 key 구조를 오류 응답에 담지 않는다.
+
+## 9. cleanup 모니터링
+
+cleanup은 실행마다 회수 결과와 이미지 용량을 CloudWatch Embedded Metric
+Format(EMF) 레코드 한 줄로 남긴다(`python -m backoffice.images --metrics-out <파일>`).
+GitHub Actions가 이 레코드를 로그 그룹에 보내면 CloudWatch가 지표를 추출한다.
+S3 기본 용량 지표(`BucketSizeBytes`)는 하루 한 번이고 버킷 전체 합계뿐이라,
+회수 효과를 따로 보려면 이 지표가 필요하다.
+
+| 지표 (`Quinquatria/ImageCleanup`, 차원 `Bucket`) | 의미 |
+| ------------------------------------------------ | ---- |
+| `Deleted` | 회수한 DB 기록 수. 객체 없이 행만 지운 경우도 센다 |
+| `Orphans` | 회수한 DB 미등록 객체 수 |
+| `Failed` | S3 삭제 실패 수. 다음 실행의 미등록 객체 회수가 다시 잡는다 |
+| `ReclaimedBytes` | S3에서 실제로 지운 바이트 |
+| `StoredObjects`, `StoredBytes` | 회수 후 이미지 prefix 아래 전체 객체 |
+| `TrashObjects`, `TrashBytes` | 그중 DB가 `ATTACHED`로 참조하지 않는 객체 (유예 중인 불용 데이터) |
+
+배포 절차:
+
+1. 버킷과 같은 리전에 [`cloudwatch/image-cleanup-monitoring.yaml`](cloudwatch/image-cleanup-monitoring.yaml)을
+   배포한다. 로그 그룹(보존 30일), cleanup role의 로그 전송 권한, 대시보드를 만든다.
+   IAM 리소스가 있으므로 `CAPABILITY_IAM`이 필요하다.
+
+   ```bash
+   aws cloudformation deploy \
+     --region ap-northeast-2 \
+     --stack-name quinquatria-image-cleanup-monitoring \
+     --template-file docs/deploy/cloudwatch/image-cleanup-monitoring.yaml \
+     --parameter-overrides BucketName=<bucket> CleanupRoleName=s3sweepcron \
+     --capabilities CAPABILITY_IAM
+   ```
+
+2. GitHub `production` environment에 변수 `CLEANUP_LOG_GROUP`(기본
+   `/quinquatria/image-cleanup`)을 넣는다. 이 변수가 비어 있으면 workflow는 전송
+   단계를 건너뛰고 cleanup만 실행한다.

@@ -102,5 +102,7 @@ class S3ObjectStore:
             async for page in paginator.paginate(Bucket=self._bucket, Prefix=prefix):
                 for item in page.get("Contents", ()):
                     yield ObjectSummary(
-                        key=item["Key"], last_modified=item["LastModified"]
+                        key=item["Key"],
+                        last_modified=item["LastModified"],
+                        size=int(item["Size"]),
                     )

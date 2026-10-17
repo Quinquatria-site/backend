@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import select
 
-from backoffice.images.cleanup import sweep
+from backoffice.images.cleanup import measure, sweep
 from quinquatria_persistence.enums import (
     ImageContentType,
     ImageResourceType,
@@ -214,3 +214,83 @@ async def test_batch_size_caps_one_run(database, store) -> None:
     report = await sweep(database, store, now=NOW, grace_seconds=GRACE, batch_size=2)
 
     assert report.deleted == 2
+
+
+async def test_reclaimed_bytes_counts_deleted_objects(database, store) -> None:
+    put_object(
+        store, "images/place/a.webp", body=b"0123456789", content_type="image/webp"
+    )
+    await _seed(database, [_image("images/place/a.webp", ImageStatus.UPLOADING)], OLD)
+
+    report = await sweep(database, store, now=NOW, grace_seconds=GRACE, batch_size=100)
+
+    assert report.reclaimed_bytes == 10
+
+
+async def test_row_without_an_object_reclaims_no_bytes(database, store) -> None:
+    """URL만 발급하고 PUT하지 않은 경우. 행은 지우지만 줄어드는 용량은 없다."""
+    await _seed(database, [_image("images/place/a.webp", ImageStatus.UPLOADING)], OLD)
+
+    report = await sweep(database, store, now=NOW, grace_seconds=GRACE, batch_size=100)
+
+    assert report.deleted == 1
+    assert report.reclaimed_bytes == 0
+
+
+async def test_orphan_bytes_are_counted(database, store) -> None:
+    put_object(
+        store,
+        "images/place/ghost.webp",
+        body=b"1234567",
+        content_type="image/webp",
+        last_modified=OLD,
+    )
+
+    report = await sweep(database, store, now=NOW, grace_seconds=GRACE, batch_size=100)
+
+    assert report.reclaimed_bytes == 7
+
+
+async def test_failed_deletion_reclaims_no_bytes(database, store) -> None:
+    put_object(
+        store, "images/place/a.webp", body=b"0123456789", content_type="image/webp"
+    )
+    store.delete_failures.add("images/place/a.webp")
+    await _seed(database, [_image("images/place/a.webp", ImageStatus.UPLOADING)], OLD)
+
+    report = await sweep(database, store, now=NOW, grace_seconds=GRACE, batch_size=100)
+
+    assert report.reclaimed_bytes == 0
+
+
+async def test_measure_separates_attached_objects_from_trash(database, store) -> None:
+    """DB가 ATTACHED로 참조하지 않는 객체는 유예와 무관하게 불용으로 센다."""
+    put_object(
+        store, "images/place/used.webp", body=b"1" * 100, content_type="image/webp"
+    )
+    put_object(
+        store, "images/place/draft.webp", body=b"2" * 20, content_type="image/webp"
+    )
+    put_object(
+        store, "images/place/old.webp", body=b"3" * 30, content_type="image/webp"
+    )
+    put_object(
+        store, "images/menu/ghost.webp", body=b"4" * 5, content_type="image/webp"
+    )
+    await _seed(
+        database,
+        [
+            _image("images/place/used.webp", ImageStatus.ATTACHED, byte_size=100),
+            _image("images/place/draft.webp", ImageStatus.UPLOADING),
+            _image("images/place/old.webp", ImageStatus.DETACHED, detached_at=RECENT),
+            _image("images/place/missing.webp", ImageStatus.UPLOADING),
+        ],
+        RECENT,
+    )
+
+    report = await measure(database, store)
+
+    assert report.stored_objects == 4
+    assert report.stored_bytes == 155
+    assert report.trash_objects == 3
+    assert report.trash_bytes == 55
