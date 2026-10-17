@@ -59,4 +59,16 @@ jobs:
                   BACKOFFICE_ISSUANCE_CODE="$(openssl rand -hex 16)"
                   BACKOFFICE_JWT_SIGNING_KEY="$(openssl rand -hex 32)"
                   export BACKOFFICE_ISSUANCE_CODE BACKOFFICE_JWT_SIGNING_KEY
-                  uv run --no-sync --package backoffice python -m backoffice.images
+                  uv run --no-sync --package backoffice python -m backoffice.images --metrics-out "$RUNNER_TEMP/cleanup-metrics.json"
+
+            # 모니터링 인프라(docs/deploy/cloudwatch)를 배포하고 변수를 넣은 뒤에만 돈다.
+            # 실행마다 log stream을 만들고 EMF 레코드를 보내 지표로 추출되게 한다.
+            - name: CloudWatch로 결과 전송
+              if: ${{ vars.CLEANUP_LOG_GROUP != '' }}
+              env:
+                  LOG_GROUP: ${{ vars.CLEANUP_LOG_GROUP }}
+                  LOG_STREAM: run-${{ github.run_id }}-${{ github.run_attempt }}
+              run: |
+                  aws logs create-log-stream --log-group-name "$LOG_GROUP" --log-stream-name "$LOG_STREAM"
+                  jq -nc --rawfile record "$RUNNER_TEMP/cleanup-metrics.json" '[{timestamp: (now * 1000 | floor), message: $record}]' > "$RUNNER_TEMP/events.json"
+                  aws logs put-log-events --log-group-name "$LOG_GROUP" --log-stream-name "$LOG_STREAM" --log-events "file://$RUNNER_TEMP/events.json"

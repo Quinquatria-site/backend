@@ -57,7 +57,11 @@ class FakeObjectStore:
     async def list_prefix(self, prefix: str) -> AsyncIterator[ObjectSummary]:
         for key, stored in sorted(self.objects.items()):
             if key.startswith(prefix):
-                yield ObjectSummary(key=key, last_modified=stored.last_modified)
+                yield ObjectSummary(
+                    key=key,
+                    last_modified=stored.last_modified,
+                    size=len(stored.body),
+                )
 
 
 class RecordingSession:

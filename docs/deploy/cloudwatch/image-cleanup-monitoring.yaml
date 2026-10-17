@@ -1,0 +1,138 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  이미지 cleanup 모니터링. cleanup 실행 결과를 받는 로그 그룹, cleanup role에
+  붙이는 로그 전송 권한, S3 기본 용량 지표와 cleanup 지표를 모은 대시보드.
+  docs/deploy/s3-image-storage.md §9 참고. 버킷과 같은 리전에 배포한다.
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: 업로드 버킷 이름
+  CleanupRoleName:
+    Type: String
+    Default: s3sweepcron
+    Description: GitHub Actions가 assume하는 cleanup role 이름
+  LogGroupName:
+    Type: String
+    Default: /quinquatria/image-cleanup
+  RetentionInDays:
+    Type: Number
+    Default: 30
+    AllowedValues: [7, 14, 30, 60, 90]
+  DashboardName:
+    Type: String
+    Default: quinquatria-image-cleanup
+
+Resources:
+  CleanupLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Ref LogGroupName
+      RetentionInDays: !Ref RetentionInDays
+
+  # 실행마다 log stream을 하나 만들고 EMF 레코드를 한 줄 보낸다.
+  CleanupLogPolicy:
+    Type: AWS::IAM::RolePolicy
+    Properties:
+      RoleName: !Ref CleanupRoleName
+      PolicyName: image-cleanup-logs
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${LogGroupName}:*'
+
+  CleanupDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    DependsOn: CleanupLogGroup
+    Properties:
+      DashboardName: !Ref DashboardName
+      DashboardBody: !Sub |
+        {
+          "start": "-P14D",
+          "widgets": [
+            {
+              "type": "metric", "x": 0, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "불용 데이터 (TrashBytes) · 전체 이미지 용량 (StoredBytes)",
+                "region": "${AWS::Region}", "view": "timeSeries", "stat": "Maximum", "period": 3600,
+                "metrics": [
+                  ["Quinquatria/ImageCleanup", "TrashBytes", "Bucket", "${BucketName}", {"label": "불용 (회수 대기)"}],
+                  [".", "StoredBytes", ".", ".", {"label": "전체 이미지"}]
+                ],
+                "yAxis": {"left": {"min": 0}}
+              }
+            },
+            {
+              "type": "metric", "x": 12, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "회수한 용량 (ReclaimedBytes, 일 합계)",
+                "region": "${AWS::Region}", "view": "bar", "stat": "Sum", "period": 86400,
+                "metrics": [
+                  ["Quinquatria/ImageCleanup", "ReclaimedBytes", "Bucket", "${BucketName}", {"label": "회수 바이트"}]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 0, "y": 6, "width": 12, "height": 6,
+              "properties": {
+                "title": "회수 건수 · 실패",
+                "region": "${AWS::Region}", "view": "timeSeries", "stat": "Sum", "period": 3600,
+                "metrics": [
+                  ["Quinquatria/ImageCleanup", "Deleted", "Bucket", "${BucketName}", {"label": "DB 기록 회수"}],
+                  [".", "Orphans", ".", ".", {"label": "DB 미등록 객체 회수"}],
+                  [".", "Failed", ".", ".", {"label": "삭제 실패", "color": "#d62728"}]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 12, "y": 6, "width": 12, "height": 6,
+              "properties": {
+                "title": "객체 수 (불용 · 전체)",
+                "region": "${AWS::Region}", "view": "timeSeries", "stat": "Maximum", "period": 3600,
+                "metrics": [
+                  ["Quinquatria/ImageCleanup", "TrashObjects", "Bucket", "${BucketName}", {"label": "불용 객체"}],
+                  [".", "StoredObjects", ".", ".", {"label": "전체 이미지 객체"}]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 0, "y": 12, "width": 12, "height": 6,
+              "properties": {
+                "title": "S3 버킷 전체 용량 (S3 기본 지표, 일 1회)",
+                "region": "${AWS::Region}", "view": "timeSeries", "stat": "Average", "period": 86400,
+                "metrics": [
+                  ["AWS/S3", "BucketSizeBytes", "BucketName", "${BucketName}", "StorageType", "StandardStorage"]
+                ]
+              }
+            },
+            {
+              "type": "metric", "x": 12, "y": 12, "width": 12, "height": 6,
+              "properties": {
+                "title": "S3 버킷 객체 수 (S3 기본 지표, 일 1회)",
+                "region": "${AWS::Region}", "view": "timeSeries", "stat": "Average", "period": 86400,
+                "metrics": [
+                  ["AWS/S3", "NumberOfObjects", "BucketName", "${BucketName}", "StorageType", "AllStorageTypes"]
+                ]
+              }
+            },
+            {
+              "type": "log", "x": 0, "y": 18, "width": 24, "height": 6,
+              "properties": {
+                "title": "실행 이력",
+                "region": "${AWS::Region}", "view": "table",
+                "query": "SOURCE '${LogGroupName}' | fields @timestamp, Deleted, Orphans, Failed, ReclaimedBytes, TrashObjects, TrashBytes, StoredBytes | sort @timestamp desc | limit 100"
+              }
+            }
+          ]
+        }
+
+Outputs:
+  LogGroupName:
+    Value: !Ref CleanupLogGroup
+    Description: GitHub production environment 변수 CLEANUP_LOG_GROUP에 넣는 값
+  DashboardUrl:
+    Value: !Sub 'https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards/dashboard/${DashboardName}'

@@ -133,6 +133,16 @@ async def test_fake_list_prefix_filters_and_sorts() -> None:
     assert isinstance(listed[0], ObjectSummary)
 
 
+async def test_fake_list_prefix_reports_object_size() -> None:
+    """cleanup이 회수한 바이트와 남은 용량을 목록 결과로 계산한다."""
+    fake = FakeObjectStore()
+    put_object(fake, "images/place/a.webp", body=b"12345", content_type="image/webp")
+
+    listed = [summary async for summary in fake.list_prefix("images/place/")]
+
+    assert listed[0].size == 5
+
+
 async def test_fake_delete_records_the_key() -> None:
     fake = FakeObjectStore()
     put_object(fake, KEY, body=b"x", content_type="image/webp")

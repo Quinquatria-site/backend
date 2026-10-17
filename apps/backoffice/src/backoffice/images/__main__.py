@@ -3,20 +3,27 @@
 실행 주기는 코드에 넣지 않는다. 배포 환경의 스케줄러가 정하며 계약은
 `docs/deploy/s3-image-storage.md`에 있다. API 프로세스와 분리돼 있어
 인스턴스가 여러 개여도 중복 실행이 해롭지 않다.
+
+`--metrics-out`을 주면 실행 결과와 용량을 CloudWatch EMF 레코드 한 줄로
+그 파일에 쓴다. 로그 그룹 전송은 실행 환경이 맡는다.
 """
 
+import argparse
 import asyncio
+import json
 import logging
 from datetime import UTC, datetime
+from pathlib import Path
 
 from backoffice.config import get_settings
-from backoffice.images.cleanup import sweep
+from backoffice.images.cleanup import measure, sweep
 from backoffice.images.masking import suppress_sdk_signature_logs
+from backoffice.images.metrics import emf_record
 from backoffice.images.s3 import S3ObjectStore
 from quinquatria_persistence import Database
 
 
-async def main() -> None:
+async def main(metrics_out: Path | None) -> None:
     logging.basicConfig(level=logging.INFO)
     # basicConfig 뒤에 건다. 스케줄러가 레벨을 DEBUG로 올려도 서명은 안 남는다.
     suppress_sdk_signature_logs()
@@ -35,15 +42,29 @@ async def main() -> None:
             grace_seconds=settings.cleanup_grace_seconds,
             batch_size=settings.cleanup_batch_size,
         )
+        storage = await measure(database, store)
         logging.getLogger(__name__).info(
-            "cleanup 완료: deleted=%s failed=%s orphans=%s",
+            "cleanup 완료: deleted=%s failed=%s orphans=%s reclaimed_bytes=%s "
+            "trash_objects=%s trash_bytes=%s stored_objects=%s stored_bytes=%s",
             report.deleted,
             report.failed,
             report.orphans,
+            report.reclaimed_bytes,
+            storage.trash_objects,
+            storage.trash_bytes,
+            storage.stored_objects,
+            storage.stored_bytes,
         )
+        if metrics_out is not None:
+            record = emf_record(
+                report, storage, bucket=settings.s3_bucket, now=datetime.now(UTC)
+            )
+            metrics_out.write_text(json.dumps(record), encoding="utf-8")
     finally:
         await database.dispose()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(prog="python -m backoffice.images")
+    parser.add_argument("--metrics-out", type=Path, default=None)
+    asyncio.run(main(parser.parse_args().metrics_out))
