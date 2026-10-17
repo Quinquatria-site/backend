@@ -55,6 +55,17 @@ Customer API와 Backoffice API는 별도 FastAPI 애플리케이션으로 배포
 | Customer   | `{customer_origin}/api/v1`   |
 | Backoffice | `{backoffice_origin}/api/v1` |
 
+**운영용 예외: `GET /healthcheck`**
+
+배포 플랫폼과 로드밸런서의 상태 확인용이다. API 버전과 무관하게 고정하려고
+두 앱 모두 `/api/v1` 밖의 `{origin}/healthcheck`에 둔다. 인증이 필요 없고
+OpenAPI 문서에 나오지 않으며, 아래 공통 응답·오류 형식(§2.2, §2.6)을 따르지 않는다.
+
+| 상태 | 조건 | 본문 |
+| ---- | ---- | ---- |
+| `200` | 앱이 2초 안에 DB에서 `SELECT 1` 응답을 받음 | `{"status": "ok"}` |
+| `503` | DB 연결 실패, 또는 2초 초과 | `{"status": "unavailable"}` |
+
 ### 2.2 HTTP와 JSON
 
 - Backoffice와 Customer API 요청·응답의 기본 Content-Type은

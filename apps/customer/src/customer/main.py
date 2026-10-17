@@ -9,6 +9,10 @@ from customer.api.router import api_router
 from quinquatria_persistence import Database
 
 
+async def _database_answers(application: FastAPI) -> None:
+    await application.state.database.ping()
+
+
 def create_app(database_url: str | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -31,6 +35,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
         router=api_router,
         lifespan=lifespan,
         cors_origins=cors_origins_from_env,
+        health_check=_database_answers,
     )
 
 
