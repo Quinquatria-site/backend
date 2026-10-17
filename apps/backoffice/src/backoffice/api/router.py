@@ -15,7 +15,7 @@ from backoffice.domains.notices.routes import router as notices_router
 from backoffice.domains.performances.routes import router as performances_router
 
 PUBLIC_PATHS = frozenset({"/api/v1/", "/api/v1/auth/token"})
-"""인증 없이 접근하는 경로. `GET /api/v1/`는 헬스체크 용도로 남긴다."""
+"""인증 없이 접근하는 경로. 헬스체크는 `/api/v1` 밖의 `GET /healthcheck`가 맡는다."""
 
 public_router = APIRouter()
 public_router.include_router(root.router)

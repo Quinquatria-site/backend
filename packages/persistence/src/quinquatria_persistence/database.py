@@ -3,6 +3,7 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from sqlalchemy import text
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -48,6 +49,11 @@ class Database:
         """
         async with self._sessions.begin() as session:
             yield session
+
+    async def ping(self) -> None:
+        """Run ``SELECT 1`` so health checks see whether the database answers."""
+        async with self.engine.connect() as connection:
+            await connection.execute(text("SELECT 1"))
 
     async def dispose(self) -> None:
         """Release the engine's connection pool during application shutdown."""

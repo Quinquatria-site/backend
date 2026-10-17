@@ -34,6 +34,10 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         await application.state.database.dispose()
 
 
+async def _database_answers(application: FastAPI) -> None:
+    await application.state.database.ping()
+
+
 def create_app() -> FastAPI:
     # 설정을 읽기 전에 건다. 기동 중 실패해도 서명이 남을 창이 없어야 한다.
     suppress_sdk_signature_logs()
@@ -42,6 +46,7 @@ def create_app() -> FastAPI:
         router=api_router,
         lifespan=lifespan,
         cors_origins=cors_origins_from_env,
+        health_check=_database_answers,
     )
 
 
